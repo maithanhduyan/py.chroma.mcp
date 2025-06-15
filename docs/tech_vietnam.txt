@@ -1,0 +1,17 @@
+Công nghệ thông tin Việt Nam đang bùng nổ với nhiều đột phá ấn tượng. Các công ty công nghệ hàng đầu:
+        - VNG Corporation: Zalo, Zing, game online
+        - FPT Software: Phần mềm, AI, digital transformation  
+        - Tiki: Thương mại điện tử
+        - Shopee Việt Nam: E-commerce platform
+        
+Các startup unicorn:
+        - VNPay: Fintech, thanh toán điện tử
+        - VinFast: Xe điện thông minh
+        - Be Group: Ride-hailing, logistics
+        
+Xu hướng công nghệ hot:
+        - AI/Machine Learning cho tiếng Việt
+        - Blockchain và Web3
+        - IoT cho smart city
+        - Cloud computing với AWS, Azure
+        - DevOps và microservices architecture

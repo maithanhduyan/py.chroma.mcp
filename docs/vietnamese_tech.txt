@@ -1,0 +1,17 @@
+Công nghệ thông tin tại Việt Nam đang phát triển mạnh mẽ.
+        
+        Startup Việt Nam:
+        Nhiều startup công nghệ Việt Nam đã thành công như VNG, FPT, Tiki, Grab Việt Nam.
+        
+        Lập trình viên Việt Nam:
+        Việt Nam có lực lượng lập trình viên chất lượng cao, nhiều người làm việc cho các công ty quốc tế.
+        
+        Ngôn ngữ lập trình phổ biến:
+        - Python: AI/ML, web development, data science
+        - JavaScript: frontend, backend với Node.js
+        - Java: enterprise applications
+        - C++: game development, system programming
+        - Rust: system programming an toàn và hiệu suất cao
+        
+        Xu hướng công nghệ:
+        IoT, AI, blockchain, cloud computing đang được ưa chuộng tại Việt Nam.

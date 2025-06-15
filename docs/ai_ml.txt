@@ -1,0 +1,14 @@
+Trí tuệ nhân tạo và Machine Learning trong thời đại hiện tại.
+        
+        Các loại Machine Learning:
+        1. Supervised Learning - Học có giám sát với dữ liệu được gán nhãn
+        2. Unsupervised Learning - Học không giám sát, tìm pattern trong dữ liệu
+        3. Reinforcement Learning - Học củng cố thông qua reward và punishment
+        
+        Natural Language Processing (NLP):
+        NLP là lĩnh vực kết hợp AI và ngôn ngữ học để xử lý văn bản tự nhiên.
+        Các ứng dụng: dịch máy, phân tích cảm xúc, chatbot, tóm tắt văn bản.
+        
+        Vector Embeddings:
+        Embeddings chuyển đổi text thành vector số để máy tính có thể hiểu ngữ nghĩa.
+        ChromaDB sử dụng embeddings để tìm kiếm semantic similarity.

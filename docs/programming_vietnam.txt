@@ -1,0 +1,20 @@
+Cộng đồng lập trình Việt Nam rất năng động và sáng tạo. Ngôn ngữ lập trình phổ biến:
+        1. JavaScript/TypeScript - Frontend và Backend development
+        2. Python - AI/ML, data science, automation
+        3. Java - Enterprise applications, Android
+        4. C# - .NET ecosystem, game development
+        5. Go - Microservices, system programming
+        6. Rust - System programming, performance critical
+        
+Framework và công cụ:
+        - React, Vue.js, Angular cho frontend
+        - Node.js, Django, FastAPI cho backend
+        - TensorFlow, PyTorch cho AI/ML
+        - Docker, Kubernetes cho DevOps
+        - AWS, Azure, GCP cho cloud computing
+        
+Coding bootcamp nổi tiếng:
+        - Techmaster: Full-stack development
+        - CodeGym: Java programming
+        - MindX: AI và Data Science
+        - FUNiX: Đào tạo lập trình online
