@@ -8,6 +8,17 @@ import logging
 from typing import Dict, Any, List, Optional
 import chromadb
 from chromadb.config import Settings
+from chromadb.types import Metadata
+
+# Import embedding modules
+try:
+    from .embedding import EmbeddingManager
+except ImportError:
+    # Fallback for standalone running
+    import sys
+    import os
+    sys.path.append(os.path.dirname(__file__))
+    from embedding import EmbeddingManager
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +32,9 @@ class MCPTools:
     def __init__(self):
         """Initialize the tools handler."""
         self.chroma_client = None
+        self.embedding_manager = EmbeddingManager()
         self._initialize_chroma()
+        self._initialize_embeddings()
 
     def _initialize_chroma(self):
         """Initialize ChromaDB client."""
@@ -32,6 +45,20 @@ class MCPTools:
         except Exception as e:
             logger.error(f"Failed to initialize ChromaDB: {e}")
             self.chroma_client = None
+
+    def _initialize_embeddings(self):
+        """Initialize embedding manager with best available model."""
+        try:
+            logger.info("Initializing embedding manager...")
+            success = self.embedding_manager.load_best_available_model()
+            if success:
+                model_info = self.embedding_manager.get_model_info()
+                logger.info(f"Embedding manager initialized with: {model_info['name']}")
+            else:
+                logger.warning("Embedding manager initialized with ChromaDB default")
+        except Exception as e:
+            logger.error(f"Failed to initialize embeddings: {e}")
+            # Continue with ChromaDB default
 
     def get_tools_list(self) -> List[Dict[str, Any]]:
         """
@@ -133,8 +160,7 @@ class MCPTools:
                     },
                     "required": ["name"],
                 },
-            },
-            {
+            },            {
                 "name": "echo",
                 "description": "Echo back the input (useful for testing)",
                 "inputSchema": {
@@ -146,6 +172,51 @@ class MCPTools:
                         }
                     },
                     "required": ["message"],
+                },
+            },
+            {
+                "name": "configure_embedding_model",
+                "description": "Configure the embedding model to use",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "model_name": {
+                            "type": "string",
+                            "description": "Name of the embedding model (e.g., mixedbread-ai/mxbai-embed-large-v1)",
+                        },
+                        "force_reload": {
+                            "type": "boolean",
+                            "description": "Force reload if model is already loaded",
+                        },
+                    },
+                    "required": ["model_name"],
+                },
+            },
+            {
+                "name": "get_embedding_model_info",
+                "description": "Get information about current embedding model",
+                "inputSchema": {"type": "object", "properties": {}},
+            },
+            {
+                "name": "chunk_text_intelligent",
+                "description": "Intelligently chunk text for better embedding (Vietnamese optimized)",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "text": {
+                            "type": "string",
+                            "description": "Text to chunk",
+                        },
+                        "chunk_size": {
+                            "type": "integer",
+                            "description": "Maximum chunk size (default: 400)",
+                        },
+                        "overlap": {
+                            "type": "integer",
+                            "description": "Overlap between chunks (default: 50)",
+                        },
+                    },
+                    "required": ["text"],
                 },
             },
         ]
@@ -179,6 +250,12 @@ class MCPTools:
             return self._query_collection(arguments)
         elif tool_name == "delete_collection":
             return self._delete_collection(arguments)
+        elif tool_name == "configure_embedding_model":
+            return self._configure_embedding_model(arguments)
+        elif tool_name == "get_embedding_model_info":
+            return self._get_embedding_model_info(arguments)
+        elif tool_name == "chunk_text_intelligent":
+            return self._chunk_text_intelligent(arguments)
         else:
             raise ValueError(f"Unknown tool: {tool_name}")
 
@@ -215,7 +292,7 @@ class MCPTools:
             raise Exception(f"Failed to list collections: {str(e)}")
 
     def _add_documents(self, arguments: Dict[str, Any]) -> str:
-        """Add documents to a ChromaDB collection."""
+        """Add documents to a ChromaDB collection with custom embeddings."""
         if not self.chroma_client:
             raise Exception("ChromaDB client not available")
 
@@ -229,16 +306,40 @@ class MCPTools:
 
             # Generate IDs if not provided
             if ids is None:
-                ids = [f"doc_{i}" for i in range(len(documents))]
+                ids = [f"doc_{i}" for i in range(len(documents))]            # Clean and prepare metadata for ChromaDB
+            cleaned_metadatas: Optional[List[Metadata]] = None
+            if metadatas:
+                cleaned_metadatas = []
+                for meta in metadatas:
+                    clean_meta: Metadata = {}
+                    for k, v in meta.items():
+                        if isinstance(v, (str, int, float, bool)) or v is None:
+                            clean_meta[k] = v
+                        else:
+                            clean_meta[k] = str(v)
+                    cleaned_metadatas.append(clean_meta)            # 🔥 Use custom embeddings if available
+            embeddings = self.embedding_manager.encode_documents(documents)
+            if embeddings:
+                # Type cast for ChromaDB compatibility
+                embeddings_list = embeddings  # Already converted to list in encode_documents
+                collection.add(
+                    documents=documents, 
+                    metadatas=cleaned_metadatas, 
+                    ids=ids,
+                    embeddings=embeddings_list  # type: ignore
+                )
+                model_info = self.embedding_manager.get_model_info()
+                return f"Added {len(documents)} documents to collection '{collection_name}' using {model_info['name']} embeddings"
+            else:
+                # Fallback to ChromaDB default
+                collection.add(documents=documents, metadatas=cleaned_metadatas, ids=ids)
+                return f"Added {len(documents)} documents to collection '{collection_name}' using ChromaDB default embeddings"
 
-            collection.add(documents=documents, metadatas=metadatas, ids=ids)
-
-            return f"Added {len(documents)} documents to collection '{collection_name}'"
         except Exception as e:
             raise Exception(f"Failed to add documents: {str(e)}")
 
     def _query_collection(self, arguments: Dict[str, Any]) -> Any:
-        """Query a ChromaDB collection."""
+        """Query a ChromaDB collection with custom query embeddings."""
         if not self.chroma_client:
             raise Exception("ChromaDB client not available")
 
@@ -250,9 +351,22 @@ class MCPTools:
         try:
             collection = self.chroma_client.get_collection(collection_name)
 
-            results = collection.query(
-                query_texts=query_texts, n_results=n_results, where=where
-            )
+            # 🔥 Use custom query embeddings if available
+            if len(query_texts) > 0:
+                query_embedding = self.embedding_manager.encode_query(query_texts[0])
+                if query_embedding:
+                    results = collection.query(
+                        query_embeddings=[query_embedding], 
+                        n_results=n_results, 
+                        where=where
+                    )
+                else:
+                    # Fallback to text-based query
+                    results = collection.query(
+                        query_texts=query_texts, n_results=n_results, where=where
+                    )
+            else:
+                raise Exception("No query texts provided")
 
             return results
         except Exception as e:
@@ -270,3 +384,37 @@ class MCPTools:
             return f"Collection '{name}' deleted successfully"
         except Exception as e:
             raise Exception(f"Failed to delete collection: {str(e)}")
+
+    def _configure_embedding_model(self, arguments: Dict[str, Any]) -> str:
+        """Configure the embedding model."""
+        model_name = arguments["model_name"]
+        force_reload = arguments.get("force_reload", False)
+        
+        try:
+            success = self.embedding_manager.load_model(model_name, force_reload)
+            if success:
+                model_info = self.embedding_manager.get_model_info()
+                return f"Successfully configured embedding model: {model_info['name']} (dim: {model_info['embedding_dim']})"
+            else:
+                return f"Failed to load model '{model_name}'. Using ChromaDB default."
+        except Exception as e:
+            raise Exception(f"Failed to configure embedding model: {str(e)}")
+
+    def _get_embedding_model_info(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """Get information about current embedding model."""
+        try:
+            return self.embedding_manager.get_model_info()
+        except Exception as e:
+            raise Exception(f"Failed to get embedding model info: {str(e)}")
+
+    def _chunk_text_intelligent(self, arguments: Dict[str, Any]) -> List[str]:
+        """Intelligently chunk text for better embeddings."""
+        text = arguments["text"]
+        chunk_size = arguments.get("chunk_size", 400)
+        overlap = arguments.get("overlap", 50)
+        
+        try:
+            chunks = self.embedding_manager.intelligent_chunk_text(text, chunk_size, overlap)
+            return chunks
+        except Exception as e:
+            raise Exception(f"Failed to chunk text: {str(e)}")

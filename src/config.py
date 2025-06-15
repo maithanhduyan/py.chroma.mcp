@@ -23,6 +23,12 @@ class MCPConfig:
         self.chroma_port = int(os.getenv("CHROMA_PORT", "8000"))
         self.chroma_database_path = os.getenv("CHROMA_DB_PATH", "./chroma_db")
 
+        # Embedding configuration
+        self.default_embedding_model = os.getenv("DEFAULT_EMBEDDING_MODEL", "mixedbread-ai/mxbai-embed-large-v1")
+        self.enable_custom_embeddings = os.getenv("ENABLE_CUSTOM_EMBEDDINGS", "true").lower() == "true"
+        self.embedding_chunk_size = int(os.getenv("EMBEDDING_CHUNK_SIZE", "400"))
+        self.embedding_chunk_overlap = int(os.getenv("EMBEDDING_CHUNK_OVERLAP", "50"))
+
         # Server capabilities
         self.capabilities = {
             "tools": {"listChanged": False},
@@ -59,4 +65,18 @@ class MCPConfig:
             "host": self.chroma_host,
             "port": self.chroma_port,
             "database_path": self.chroma_database_path,
+        }
+
+    def get_embedding_config(self) -> Dict[str, Any]:
+        """
+        Get embedding configuration.
+
+        Returns:
+            Embedding configuration dictionary
+        """
+        return {
+            "default_model": self.default_embedding_model,
+            "enable_custom_embeddings": self.enable_custom_embeddings,
+            "chunk_size": self.embedding_chunk_size,
+            "chunk_overlap": self.embedding_chunk_overlap,
         }
