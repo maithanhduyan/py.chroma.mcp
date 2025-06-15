@@ -24,8 +24,12 @@ class MCPConfig:
         self.chroma_database_path = os.getenv("CHROMA_DB_PATH", "./chroma_db")
 
         # Embedding configuration
-        self.default_embedding_model = os.getenv("DEFAULT_EMBEDDING_MODEL", "mixedbread-ai/mxbai-embed-large-v1")
-        self.enable_custom_embeddings = os.getenv("ENABLE_CUSTOM_EMBEDDINGS", "true").lower() == "true"
+        self.default_embedding_model = os.getenv(
+            "DEFAULT_EMBEDDING_MODEL", "mixedbread-ai/mxbai-embed-large-v1"
+        )
+        self.enable_custom_embeddings = (
+            os.getenv("ENABLE_CUSTOM_EMBEDDINGS", "true").lower() == "true"
+        )
         self.embedding_chunk_size = int(os.getenv("EMBEDDING_CHUNK_SIZE", "400"))
         self.embedding_chunk_overlap = int(os.getenv("EMBEDDING_CHUNK_OVERLAP", "50"))
 

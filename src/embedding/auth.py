@@ -20,7 +20,7 @@ class HuggingFaceAuth:
     def setup_token() -> Optional[str]:
         """
         Setup Hugging Face token từ nhiều nguồn khác nhau.
-        
+
         Returns:
             Valid HF token or None
         """
@@ -67,16 +67,16 @@ class HuggingFaceAuth:
     def validate_model_access(model_name: str) -> bool:
         """
         Validate if we can access a specific model.
-        
+
         Args:
             model_name: Name of the model to check
-            
+
         Returns:
             True if model is accessible
         """
         try:
             from huggingface_hub import model_info
-            
+
             token = HuggingFaceAuth.setup_token()
             if token:
                 # Try to get model info with token

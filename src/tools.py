@@ -17,6 +17,7 @@ except ImportError:
     # Fallback for standalone running
     import sys
     import os
+
     sys.path.append(os.path.dirname(__file__))
     from embedding import EmbeddingManager
 
@@ -160,7 +161,8 @@ class MCPTools:
                     },
                     "required": ["name"],
                 },
-            },            {
+            },
+            {
                 "name": "echo",
                 "description": "Echo back the input (useful for testing)",
                 "inputSchema": {
@@ -304,11 +306,59 @@ class MCPTools:
         try:
             collection = self.chroma_client.get_collection(collection_name)
 
+            # 🔍 Validate and clean documents
+            if not isinstance(documents, list):
+                raise ValueError(f"Documents must be a list, got {type(documents)}")
+
+            cleaned_documents = []
+            for i, doc in enumerate(documents):
+                if not isinstance(doc, str):
+                    # Try to convert to string
+                    try:
+                        doc_str = str(doc)
+                        logger.warning(
+                            f"Document {i} converted from {type(doc)} to string"
+                        )
+                    except Exception as e:
+                        raise ValueError(
+                            f"Document {i} cannot be converted to string: {e}"
+                        )
+                else:
+                    doc_str = doc
+
+                # Ensure valid encoding
+                try:
+                    doc_str.encode("utf-8")
+                    cleaned_documents.append(doc_str.strip())
+                except UnicodeEncodeError as e:
+                    logger.warning(f"Document {i} has encoding issues, cleaning: {e}")
+                    # Remove problematic characters
+                    doc_str = doc_str.encode("utf-8", errors="ignore").decode("utf-8")
+                    cleaned_documents.append(doc_str.strip())
+
+            # Filter out empty documents
+            cleaned_documents = [doc for doc in cleaned_documents if doc.strip()]
+            if not cleaned_documents:
+                raise ValueError("No valid documents after cleaning")
+
             # Generate IDs if not provided
             if ids is None:
-                ids = [f"doc_{i}" for i in range(len(documents))]            # Clean and prepare metadata for ChromaDB
+                ids = [f"doc_{i}" for i in range(len(cleaned_documents))]
+            elif len(ids) != len(cleaned_documents):
+                logger.warning(
+                    f"IDs length ({len(ids)}) doesn't match documents length ({len(cleaned_documents)}), regenerating"
+                )
+                ids = [
+                    f"doc_{i}" for i in range(len(cleaned_documents))
+                ]  # Clean and prepare metadata for ChromaDB
             cleaned_metadatas: Optional[List[Metadata]] = None
             if metadatas:
+                if len(metadatas) != len(cleaned_documents):
+                    logger.warning(
+                        f"Metadata length ({len(metadatas)}) doesn't match documents length ({len(cleaned_documents)}), truncating"
+                    )
+                    metadatas = metadatas[: len(cleaned_documents)]
+
                 cleaned_metadatas = []
                 for meta in metadatas:
                     clean_meta: Metadata = {}
@@ -317,24 +367,33 @@ class MCPTools:
                             clean_meta[k] = v
                         else:
                             clean_meta[k] = str(v)
-                    cleaned_metadatas.append(clean_meta)            # 🔥 Use custom embeddings if available
-            embeddings = self.embedding_manager.encode_documents(documents)
+                    cleaned_metadatas.append(clean_meta)
+
+            # 🔥 Use custom embeddings if available
+            embeddings = self.embedding_manager.encode_documents(cleaned_documents)
             if embeddings:
                 # Type cast for ChromaDB compatibility
-                embeddings_list = embeddings  # Already converted to list in encode_documents
+                embeddings_list = (
+                    embeddings  # Already converted to list in encode_documents
+                )
                 collection.add(
-                    documents=documents, 
-                    metadatas=cleaned_metadatas, 
+                    documents=cleaned_documents,
+                    metadatas=cleaned_metadatas,
                     ids=ids,
-                    embeddings=embeddings_list  # type: ignore
+                    embeddings=embeddings_list,  # type: ignore
                 )
                 model_info = self.embedding_manager.get_model_info()
-                return f"Added {len(documents)} documents to collection '{collection_name}' using {model_info['name']} embeddings"
+                return f"Added {len(cleaned_documents)} documents to collection '{collection_name}' using {model_info['name']} embeddings"
             else:
                 # Fallback to ChromaDB default
-                collection.add(documents=documents, metadatas=cleaned_metadatas, ids=ids)
-                return f"Added {len(documents)} documents to collection '{collection_name}' using ChromaDB default embeddings"
+                collection.add(
+                    documents=cleaned_documents, metadatas=cleaned_metadatas, ids=ids
+                )
+                return f"Added {len(cleaned_documents)} documents to collection '{collection_name}' using ChromaDB default embeddings"
 
+        except ValueError as e:
+            # More specific error for validation issues
+            raise Exception(f"Document validation failed: {str(e)}")
         except Exception as e:
             raise Exception(f"Failed to add documents: {str(e)}")
 
@@ -356,9 +415,9 @@ class MCPTools:
                 query_embedding = self.embedding_manager.encode_query(query_texts[0])
                 if query_embedding:
                     results = collection.query(
-                        query_embeddings=[query_embedding], 
-                        n_results=n_results, 
-                        where=where
+                        query_embeddings=[query_embedding],
+                        n_results=n_results,
+                        where=where,
                     )
                 else:
                     # Fallback to text-based query
@@ -389,7 +448,7 @@ class MCPTools:
         """Configure the embedding model."""
         model_name = arguments["model_name"]
         force_reload = arguments.get("force_reload", False)
-        
+
         try:
             success = self.embedding_manager.load_model(model_name, force_reload)
             if success:
@@ -412,9 +471,36 @@ class MCPTools:
         text = arguments["text"]
         chunk_size = arguments.get("chunk_size", 400)
         overlap = arguments.get("overlap", 50)
-        
+
         try:
-            chunks = self.embedding_manager.intelligent_chunk_text(text, chunk_size, overlap)
-            return chunks
+            # Validate input
+            if not isinstance(text, str):
+                text = str(text)
+
+            # Ensure valid encoding
+            try:
+                text.encode("utf-8")
+            except UnicodeEncodeError:
+                text = text.encode("utf-8", errors="ignore").decode("utf-8")
+
+            chunks = self.embedding_manager.intelligent_chunk_text(
+                text, chunk_size, overlap
+            )
+
+            # Validate and clean output chunks
+            cleaned_chunks = []
+            for chunk in chunks:
+                if isinstance(chunk, str) and chunk.strip():
+                    try:
+                        chunk.encode("utf-8")
+                        cleaned_chunks.append(chunk.strip())
+                    except UnicodeEncodeError:
+                        cleaned_chunk = chunk.encode("utf-8", errors="ignore").decode(
+                            "utf-8"
+                        )
+                        if cleaned_chunk.strip():
+                            cleaned_chunks.append(cleaned_chunk.strip())
+
+            return cleaned_chunks
         except Exception as e:
             raise Exception(f"Failed to chunk text: {str(e)}")

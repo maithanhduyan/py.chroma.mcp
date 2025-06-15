@@ -23,7 +23,7 @@ class EmbeddingManager:
         self.models: Dict[str, Any] = {}  # Cache loaded models
         self.current_model = None
         self.current_model_name = "chromadb-default"
-        
+
         # Model priority list (best to fallback)
         self.model_priority = [
             "mixedbread-ai/mxbai-embed-large-v1",  # SOTA, requires HF token
@@ -35,11 +35,11 @@ class EmbeddingManager:
     def load_model(self, model_name: str, force_reload: bool = False) -> bool:
         """
         Load an embedding model.
-        
+
         Args:
             model_name: Name of the model to load
             force_reload: Whether to reload if already cached
-            
+
         Returns:
             True if model loaded successfully
         """
@@ -57,20 +57,20 @@ class EmbeddingManager:
 
         try:
             logger.info(f"🔄 Loading embedding model: {model_name}")
-            
+
             from sentence_transformers import SentenceTransformer
-            
+
             # Load the model
             model = SentenceTransformer(model_name)
-            
+
             # Cache the model
             self.models[model_name] = model
             self.current_model = model
             self.current_model_name = model_name
-            
+
             logger.info(f"✅ Successfully loaded model: {model_name}")
             return True
-            
+
         except Exception as e:
             logger.error(f"❌ Failed to load model {model_name}: {e}")
             return False
@@ -78,22 +78,22 @@ class EmbeddingManager:
     def load_best_available_model(self) -> bool:
         """
         Load the best available embedding model from priority list.
-        
+
         Returns:
             True if any model was loaded successfully
         """
         logger.info("🔄 Loading best available embedding model...")
-        
+
         for model_name in self.model_priority:
             logger.info(f"🔄 Trying to load: {model_name}")
-            
+
             if self.load_model(model_name):
                 logger.info(f"✅ Successfully loaded: {model_name}")
                 return True
             else:
                 logger.warning(f"❌ Failed to load: {model_name}")
                 continue
-        
+
         # If all models fail, use ChromaDB default
         logger.warning("❌ All embedding models failed to load")
         logger.info("🔄 Falling back to ChromaDB default embedding...")
@@ -101,34 +101,42 @@ class EmbeddingManager:
         self.current_model_name = "chromadb-default"
         return False
 
-    def encode_documents(self, texts: List[str], normalize: bool = True) -> Optional[List[List[float]]]:
+    def encode_documents(
+        self, texts: List[str], normalize: bool = True
+    ) -> Optional[List[List[float]]]:
         """
         Encode a list of documents into embeddings.
-        
+
         Args:
             texts: List of texts to encode
             normalize: Whether to normalize embeddings
-            
+
         Returns:
             List of embeddings or None if no model available
         """
         if not self.current_model:
             logger.warning("No embedding model available, returning None")
             return None
-            
+
         try:
-            logger.debug(f"🧠 Encoding {len(texts)} documents with {self.current_model_name}")
-            embeddings = self.current_model.encode(texts, normalize_embeddings=normalize)
-            
+            logger.debug(
+                f"🧠 Encoding {len(texts)} documents with {self.current_model_name}"
+            )
+            embeddings = self.current_model.encode(
+                texts, normalize_embeddings=normalize
+            )
+
             # Convert numpy array to list for ChromaDB compatibility
             if isinstance(embeddings, np.ndarray):
                 embeddings_list = embeddings.tolist()
             else:
                 embeddings_list = embeddings
-                
-            logger.debug(f"✅ Generated embeddings: {len(embeddings_list)} x {len(embeddings_list[0])}")
+
+            logger.debug(
+                f"✅ Generated embeddings: {len(embeddings_list)} x {len(embeddings_list[0])}"
+            )
             return embeddings_list
-            
+
         except Exception as e:
             logger.error(f"❌ Failed to encode documents: {e}")
             return None
@@ -136,31 +144,37 @@ class EmbeddingManager:
     def encode_query(self, query: str, normalize: bool = True) -> Optional[List[float]]:
         """
         Encode a single query into embedding.
-        
+
         Args:
             query: Query text to encode
             normalize: Whether to normalize embedding
-            
+
         Returns:
             Query embedding or None if no model available
         """
         if not self.current_model:
             logger.warning("No embedding model available, returning None")
             return None
-            
+
         try:
-            logger.debug(f"🧠 Encoding query with {self.current_model_name}: '{query[:50]}...'")
-            embedding = self.current_model.encode([query], normalize_embeddings=normalize)
-            
+            logger.debug(
+                f"🧠 Encoding query with {self.current_model_name}: '{query[:50]}...'"
+            )
+            embedding = self.current_model.encode(
+                [query], normalize_embeddings=normalize
+            )
+
             # Convert to list for ChromaDB compatibility
             if isinstance(embedding, np.ndarray):
                 embedding_list = embedding[0].tolist()
             else:
                 embedding_list = embedding[0]
-                
-            logger.debug(f"✅ Generated query embedding: {len(embedding_list)} dimensions")
+
+            logger.debug(
+                f"✅ Generated query embedding: {len(embedding_list)} dimensions"
+            )
             return embedding_list
-            
+
         except Exception as e:
             logger.error(f"❌ Failed to encode query: {e}")
             return None
@@ -168,7 +182,7 @@ class EmbeddingManager:
     def get_model_info(self) -> Dict[str, Any]:
         """
         Get information about the current model.
-        
+
         Returns:
             Model information dictionary
         """
@@ -177,33 +191,39 @@ class EmbeddingManager:
                 "name": self.current_model_name,
                 "status": "No custom model loaded",
                 "embedding_dim": "Unknown",
-                "type": "ChromaDB default"
+                "type": "ChromaDB default",
             }
-        
+
         try:
             # Try to get embedding dimension
-            test_embedding = self.current_model.encode(["test"], normalize_embeddings=False)
-            embedding_dim = len(test_embedding[0]) if len(test_embedding) > 0 else "Unknown"
+            test_embedding = self.current_model.encode(
+                ["test"], normalize_embeddings=False
+            )
+            embedding_dim = (
+                len(test_embedding[0]) if len(test_embedding) > 0 else "Unknown"
+            )
         except:
             embedding_dim = "Unknown"
-            
+
         return {
             "name": self.current_model_name,
             "status": "Loaded and ready",
             "embedding_dim": embedding_dim,
             "type": "SentenceTransformer",
-            "cached_models": list(self.models.keys())
+            "cached_models": list(self.models.keys()),
         }
 
-    def intelligent_chunk_text(self, text: str, chunk_size: int = 400, overlap: int = 50) -> List[str]:
+    def intelligent_chunk_text(
+        self, text: str, chunk_size: int = 400, overlap: int = 50
+    ) -> List[str]:
         """
         Intelligent text chunking for Vietnamese text.
-        
+
         Args:
             text: Text to chunk
             chunk_size: Maximum chunk size
             overlap: Overlap between chunks
-            
+
         Returns:
             List of text chunks
         """
@@ -224,8 +244,14 @@ class EmbeddingManager:
                     temp_sentence += char
                     if char in ".!?":
                         # Kiểm tra không phải số thập phân
-                        remaining_text = para[para.find(temp_sentence) + len(temp_sentence):]
-                        next_chars = remaining_text[:3] if len(remaining_text) >= 3 else remaining_text
+                        remaining_text = para[
+                            para.find(temp_sentence) + len(temp_sentence) :
+                        ]
+                        next_chars = (
+                            remaining_text[:3]
+                            if len(remaining_text) >= 3
+                            else remaining_text
+                        )
                         if not any(c.isdigit() for c in next_chars):
                             sentences.append(temp_sentence.strip())
                             temp_sentence = ""
