@@ -1,0 +1,10 @@
+{
+  "servers": {
+    "chroma": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "src/server.py"],
+      "cwd": "${workspaceFolder}"
+    }
+  }
+}
