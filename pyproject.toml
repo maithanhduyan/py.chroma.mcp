@@ -7,14 +7,17 @@ authors = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "chromadb",
-    "mcp",
+    "chromadb>=0.4.0",
+    "mcp>=1.0.0",
     "langchain>=0.1.0",
     "langchain-community", 
     "langchain-chroma",
-    "transformers",
-    "sentence-transformers",
-    "torch"
+    "transformers>=4.30.0",
+    "sentence-transformers>=2.2.0",
+    "torch>=2.0.0",
+    "huggingface-hub>=0.16.0",
+    "pydantic>=2.0.0",
+    "typing-extensions>=4.5.0"
 ]
 
 [tool.black]

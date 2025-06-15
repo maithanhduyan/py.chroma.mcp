@@ -2178,25 +2178,31 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "chromadb" },
+    { name = "huggingface-hub" },
     { name = "langchain" },
     { name = "langchain-chroma" },
     { name = "langchain-community" },
     { name = "mcp" },
+    { name = "pydantic" },
     { name = "sentence-transformers" },
     { name = "torch" },
     { name = "transformers" },
+    { name = "typing-extensions" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "chromadb" },
+    { name = "chromadb", specifier = ">=0.4.0" },
+    { name = "huggingface-hub", specifier = ">=0.16.0" },
     { name = "langchain", specifier = ">=0.1.0" },
     { name = "langchain-chroma" },
     { name = "langchain-community" },
-    { name = "mcp" },
-    { name = "sentence-transformers" },
-    { name = "torch" },
-    { name = "transformers" },
+    { name = "mcp", specifier = ">=1.0.0" },
+    { name = "pydantic", specifier = ">=2.0.0" },
+    { name = "sentence-transformers", specifier = ">=2.2.0" },
+    { name = "torch", specifier = ">=2.0.0" },
+    { name = "transformers", specifier = ">=4.30.0" },
+    { name = "typing-extensions", specifier = ">=4.5.0" },
 ]
 
 [[package]]
