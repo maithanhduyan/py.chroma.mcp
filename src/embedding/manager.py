@@ -22,14 +22,14 @@ class EmbeddingManager:
         """Initialize the embedding manager."""
         self.models: Dict[str, Any] = {}  # Cache loaded models
         self.current_model = None
-        self.current_model_name = "chromadb-default"
-
-        # Model priority list (best to fallback)
+        self.current_model_name = (
+            "chromadb-default"  # Model priority list (best to fallback)
+        )
         self.model_priority = [
+            "sentence-transformers/all-MiniLM-L12-v2",  # Smallest, fastest
+            "sentence-transformers/distiluse-base-multilingual-cased",  # Fast multilingual, smaller
+            "sentence-transformers/paraphrase-multilingual-mpnet-base-v2",  # Good multilingual, larger
             "mixedbread-ai/mxbai-embed-large-v1",  # SOTA, requires HF token
-            "sentence-transformers/paraphrase-multilingual-mpnet-base-v2",  # Good multilingual
-            "sentence-transformers/distiluse-base-multilingual-cased",  # Fast multilingual
-            "sentence-transformers/all-MiniLM-L12-v2",  # Balanced performance
         ]
 
     def load_model(self, model_name: str, force_reload: bool = False) -> bool:
