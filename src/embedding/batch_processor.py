@@ -105,9 +105,7 @@ class BatchProcessor:
             "total_documents": 0,
             "cache_hits": 0,
             "processing_time": 0.0,
-        }
-
-        # Adaptive batch sizing parameters
+        }  # Adaptive batch sizing parameters
         self.min_batch_size = 1
         self.max_batch_size = 1000
         self.default_batch_size = 100
@@ -117,6 +115,8 @@ class BatchProcessor:
         """Get available system memory in GB."""
         try:
             if HAS_PSUTIL:
+                import psutil
+
                 memory = psutil.virtual_memory()
                 return memory.available / (1024**3)
             else:
