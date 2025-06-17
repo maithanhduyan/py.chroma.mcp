@@ -6,33 +6,17 @@ Handles loading and managing different embedding models.
 
 import logging
 import os
-import sys
 from typing import Dict, List, Optional, Any
 import numpy as np
 
-# Handle imports with proper path setup
-current_dir = os.path.dirname(__file__)
-src_dir = os.path.dirname(current_dir)
-if src_dir not in sys.path:
-    sys.path.insert(0, src_dir)
+# Import config to setup project paths automatically
+import config
 
-# Import metrics - try relative first, then absolute
-try:
-    from ..utils.metrics import (
-        track_execution_time,
-        measure_memory_usage,
-        MetricsCollector,
-    )
-except ImportError:
-    try:
-        from utils.metrics import (
-            track_execution_time,
-            measure_memory_usage,
-            MetricsCollector,
-        )
-    except ImportError:
-        # This should not happen if paths are set correctly, but just in case
-        raise ImportError("Could not import metrics module. Check your Python path.")
+from utils.metrics import (
+    track_execution_time,
+    measure_memory_usage,
+    MetricsCollector,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,15 +31,16 @@ class EmbeddingManager:
         """Initialize the embedding manager."""
         self.models: Dict[str, Any] = {}  # Cache loaded models
         self.current_model = None
-        self.current_model_name = (
-            "chromadb-default"  # Model priority list (best to fallback)
-        )
+        self.current_model_name = "chromadb-default"  # Model priority list (fastest to slowest, no HF token required)
         self.model_priority = [
-            "sentence-transformers/all-MiniLM-L12-v2",  # Smallest, fastest
-            "sentence-transformers/distiluse-base-multilingual-cased",  # Fast multilingual, smaller
-            "sentence-transformers/paraphrase-multilingual-mpnet-base-v2",  # Good multilingual, larger
-            "mixedbread-ai/mxbai-embed-large-v1",  # SOTA, requires HF token
-        ]  # Initialize metrics collector
+            "nomic-ai/nomic-embed-text-v1.5",  # Very lightweight (137MB), no token needed, good performance
+            "sentence-transformers/all-MiniLM-L6-v2",  # Tiny (90MB), very fast, English only
+            "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",  # Small (177MB), multilingual
+            "sentence-transformers/all-mpnet-base-v2",  # Good quality (420MB), English only
+            "sentence-transformers/paraphrase-multilingual-mpnet-base-v2",  # High quality (1.1GB), multilingual
+        ]
+
+        # Initialize metrics collector
         self.metrics = MetricsCollector()
         # Simple operation counters for immediate metrics
         self.operation_counts = {
@@ -66,47 +51,87 @@ class EmbeddingManager:
 
     def load_model(self, model_name: str, force_reload: bool = False) -> bool:
         """
-        Load an embedding model.
-
-        Args:
+        Load an embedding model.        Args:
             model_name: Name of the model to load
-            force_reload: Whether to reload if already cached
-
-        Returns:
-            True if model loaded successfully"""
+            force_reload: Whether to reload if already cached        Returns:
+            True if model loaded successfully
+        """
         with track_execution_time("load_model"):
             result = self._do_load_model(model_name, force_reload)
             if result:
                 self.operation_counts["load_model"] += 1
             return result
 
+    def _detect_optimal_device(self) -> str:
+        """
+        Detect the optimal device for running embedding models.
+
+        Returns:
+            Device string: "cuda", "mps" (Mac), or "cpu"
+        """
+        try:
+            # Try to import torch to check for GPU availability
+            import torch
+
+            if torch.cuda.is_available():
+                device = "cuda"
+                gpu_count = torch.cuda.device_count()
+                gpu_name = torch.cuda.get_device_name(0) if gpu_count > 0 else "Unknown"
+                logger.info(f"🚀 CUDA available: {gpu_count} GPU(s) - {gpu_name}")
+                return device
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                logger.info("🍎 MPS (Apple Silicon) available")
+                return "mps"
+            else:
+                logger.info("💻 Using CPU for embeddings")
+                return "cpu"
+
+        except ImportError:
+            logger.warning("⚠️ PyTorch not available, using CPU")
+            return "cpu"
+        except Exception as e:
+            logger.warning(f"⚠️ Device detection failed: {e}, using CPU")
+            return "cpu"
+
     def _do_load_model(self, model_name: str, force_reload: bool = False) -> bool:
-        """Internal method for loading model without metrics tracking."""  # Check if already loaded and cached
+        """Internal method for loading model without metrics tracking."""
+        # Check if already loaded and cached
         if not force_reload and model_name in self.models:
             self.current_model = self.models[model_name]
             self.current_model_name = model_name
             logger.info(f"✅ Using cached model: {model_name}")
             return True
 
-        # Setup HF authentication using environment variable
-        token = os.getenv("HF_TOKEN")
-        if not token and model_name.startswith("mixedbread-ai"):
-            logger.warning(f"⚠️ No HF_TOKEN found, may not be able to load {model_name}")
-
         try:
             logger.info(f"🔄 Loading embedding model: {model_name}")
+            logger.info("⏳ This may take a few minutes for first-time downloads...")
 
             from sentence_transformers import SentenceTransformer
 
-            # Load the model
-            model = SentenceTransformer(model_name)
+            # Detect optimal device (GPU/CPU)
+            device = self._detect_optimal_device()
+
+            # Load the model with appropriate device and progress indication
+            logger.info(f"📱 Loading model on device: {device}")
+            logger.info(
+                "📥 Downloading model files (if not cached)..."
+            )  # Set cache directory for faster subsequent loads
+            cache_dir = os.getenv("SENTENCE_TRANSFORMERS_HOME", "./models_cache")
+
+            model = SentenceTransformer(
+                model_name,
+                device=device,
+                cache_folder=cache_dir,
+                trust_remote_code=True,
+            )
 
             # Cache the model
             self.models[model_name] = model
             self.current_model = model
             self.current_model_name = model_name
 
-            logger.info(f"✅ Successfully loaded model: {model_name}")
+            logger.info(f"✅ Successfully loaded model: {model_name} on {device}")
+            logger.info(f"💾 Model cached to: {cache_dir}")
             return True
 
         except Exception as e:
@@ -217,9 +242,7 @@ class EmbeddingManager:
             )
             embedding = self.current_model.encode(
                 [query], normalize_embeddings=normalize
-            )
-
-            # Convert to list for ChromaDB compatibility
+            )  # Convert to list for ChromaDB compatibility
             if isinstance(embedding, np.ndarray):
                 embedding_list = embedding[0].tolist()
             else:
@@ -247,6 +270,7 @@ class EmbeddingManager:
                 "status": "No custom model loaded",
                 "embedding_dim": "Unknown",
                 "type": "ChromaDB default",
+                "device": "N/A",
             }
 
         try:
@@ -257,14 +281,29 @@ class EmbeddingManager:
             embedding_dim = (
                 len(test_embedding[0]) if len(test_embedding) > 0 else "Unknown"
             )
+
+            # Get device information
+            device = "Unknown"
+            try:
+                if hasattr(self.current_model, "_target_device"):
+                    device = str(self.current_model._target_device)
+                elif hasattr(self.current_model, "device"):
+                    device = str(self.current_model.device)
+                else:
+                    device = self._detect_optimal_device()
+            except:
+                device = "Unknown"
+
         except:
             embedding_dim = "Unknown"
+            device = "Unknown"
 
         return {
             "name": self.current_model_name,
             "status": "Loaded and ready",
             "embedding_dim": embedding_dim,
             "type": "SentenceTransformer",
+            "device": device,
             "cached_models": list(self.models.keys()),
         }
 
@@ -354,3 +393,24 @@ class EmbeddingManager:
             chunks.append(current_chunk.strip())
 
         return [chunk for chunk in chunks if len(chunk.strip()) > 20]
+
+    def get_model_sizes_info(self) -> Dict[str, Any]:
+        """
+        Get information about model sizes for user to choose.
+
+        Returns:
+            Dictionary with model names and their approximate sizes
+        """
+        size_info = {
+            "nomic-ai/nomic-embed-text-v1.5": "137MB - Lightweight, good performance, no token needed",
+            "sentence-transformers/all-MiniLM-L6-v2": "90MB - Very fast, English only",
+            "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2": "177MB - Fast, multilingual",
+            "sentence-transformers/all-mpnet-base-v2": "420MB - Good quality, English only",
+            "sentence-transformers/paraphrase-multilingual-mpnet-base-v2": "1.1GB - High quality, multilingual",
+        }
+
+        return {
+            "available_models": size_info,
+            "recommendation": "For fast testing: nomic-ai/nomic-embed-text-v1.5",
+            "note": "All models are publicly accessible, no HF token required",
+        }

@@ -10,8 +10,11 @@ import os
 import asyncio
 import logging
 
-# Add parent directory to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+# Add src directory to path
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "src"))
+
+# Import config to setup paths automatically
+import config
 
 # Setup logging to capture embedding usage
 logging.basicConfig(level=logging.INFO, format="%(name)s - %(levelname)s - %(message)s")

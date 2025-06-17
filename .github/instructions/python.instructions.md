@@ -162,3 +162,14 @@ Before committing code, ensure:
 ## Thử nghiệm code với sandbox
 Nếu file gặp nhiều lỗi thì có thể thử nghiệm trong `tests/sandbox` sau đó merge code vào.
 - Thử nghiệm xong phải xóa file trong sandbox.
+
+## Git Branching hiệu quả
+- **master**: production
+
+- **develop**: tích hợp các tính năng
+
+- **feature/**: phát triển tính năng
+
+- **release/**: chuẩn bị phát hành
+
+- **hotfix/**: sửa lỗi khẩn cấp

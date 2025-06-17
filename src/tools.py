@@ -15,6 +15,7 @@ list of tools:
 - get_embedding_model_info()
 - configure_embedding_model()
 - chunk_text_intelligent()
+- get_model_sizes_info()
 """
 
 import logging
@@ -24,38 +25,16 @@ from chromadb.config import Settings
 from chromadb.types import Metadata
 from mcp.server.fastmcp import FastMCP
 
-# Import embedding modules
-import sys
-import os
+# Import config to setup project paths automatically
+import config
 
-# Ensure proper imports work by adding src to path if needed
-current_dir = os.path.dirname(__file__)
-src_dir = (
-    os.path.dirname(current_dir)
-    if os.path.basename(current_dir) == "src"
-    else current_dir
+from embedding import EmbeddingManager
+from embedding.chunker import chunk_text_intelligent as _chunk_text_intelligent
+from utils.metrics import (
+    track_execution_time,
+    measure_memory_usage,
+    MetricsCollector,
 )
-if src_dir not in sys.path:
-    sys.path.insert(0, src_dir)
-
-# Now do the imports - they should work whether run as module or standalone
-try:
-    from .embedding import EmbeddingManager
-    from .embedding.chunker import chunk_text_intelligent as _chunk_text_intelligent
-    from .utils.metrics import (
-        track_execution_time,
-        measure_memory_usage,
-        MetricsCollector,
-    )
-except ImportError:
-    # If relative imports fail, try absolute imports
-    from embedding import EmbeddingManager
-    from embedding.chunker import chunk_text_intelligent as _chunk_text_intelligent
-    from utils.metrics import (
-        track_execution_time,
-        measure_memory_usage,
-        MetricsCollector,
-    )
 
 HAS_METRICS = True
 
@@ -355,6 +334,23 @@ async def get_performance_metrics() -> Dict[str, Any]:
         return manager.get_metrics()
     else:
         return {"message": "Metrics not available", "total_operations": 0}
+
+
+@mcp.tool()
+async def get_model_sizes_info() -> Dict[str, Any]:
+    """Get information about available embedding models and their sizes."""
+    embedding_manager = get_embedding_manager()
+    try:
+        if hasattr(embedding_manager, "get_model_sizes_info"):
+            return embedding_manager.get_model_sizes_info()
+        else:
+            return {
+                "message": "Model size information not available",
+                "recommendation": "Use smaller models for faster loading",
+            }
+    except Exception as e:
+        logger.error(f"Failed to get model sizes info: {e}")
+        return {"error": f"Failed to get model sizes: {str(e)}"}
 
 
 ##### Utility Functions (for compatibility) #####

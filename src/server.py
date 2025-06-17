@@ -12,6 +12,9 @@ import logging
 import time
 from typing import Dict, Any, Optional
 
+# Import config to setup project paths automatically (main entry point)
+import config
+
 # Import FastMCP and tools
 from tools import mcp
 
@@ -70,39 +73,59 @@ def log_server_startup():
     logger.info("🚀 FastMCP ChromaDB Server Starting")
     logger.info("=" * 60)
     logger.info(f"📋 Server: {startup_info['server']} v{startup_info['version']}")
-    logger.info(f"🤖 Embedding: mixedbread-ai/mxbai-embed-large-v1")
+    logger.info(f"🤖 Embedding: nomic-ai/nomic-embed-text-v1.5 (lightweight)")
     logger.info(f"🇻🇳 Vietnamese: Fully Supported")
     logger.info(f"🛠️ Tools: {len(startup_info['tools'])} available")
     logger.info(f"⏰ Started: {startup_info['startup_time']}")
     logger.info("=" * 60)
 
 
-async def initialize_systems_async() -> Dict[str, Any]:
+def initialize_systems_sync() -> Dict[str, Any]:
     """
-    Initialize ChromaDB and embedding systems asynchronously.
+    Initialize ChromaDB and embedding systems synchronously.
+    FastMCP handles its own async operations internally.
 
     Returns:
-        Dictionary with initialization results
-    """
+        Dictionary with initialization results"""
     logger.info("🔧 Initializing embedding systems...")
 
     # Import to trigger initialization
     from tools import get_chroma_client, get_embedding_manager
 
-    # Initialize ChromaDB (this can be made async in future)
+    # Initialize ChromaDB
     chroma_client = get_chroma_client()
     logger.info(f"✅ ChromaDB initialized: {type(chroma_client).__name__}")
 
-    # Initialize embeddings
+    # Initialize embeddings and try to load a fast model
     embedding_manager = get_embedding_manager()
-    model_info = embedding_manager.get_model_info()
 
+    # Try to load a lightweight model for faster development
+    logger.info("🚀 Pre-loading embedding model for better user experience...")
+
+    # Check if any model is already loaded (from cache)
+    model_info = embedding_manager.get_model_info()
     if model_info and model_info.get("name") != "chromadb-default":
         model_name = model_info.get("name", "unknown")
         model_dim = model_info.get("embedding_dim", "unknown")
-        logger.info(f"✅ Embedding model: {model_name} ({model_dim}D)")
+        device = model_info.get("device", "unknown")
+        logger.info(
+            f"✅ Using cached embedding model: {model_name} ({model_dim}D) on {device}"
+        )
     else:
-        logger.info("✅ Embedding model: None loaded (will use ChromaDB default)")
+        # Try to load the fastest model from our priority list
+        logger.info("⚡ Loading lightweight model for fast development...")
+        success = embedding_manager.load_best_available_model()
+
+        if success:
+            model_info = embedding_manager.get_model_info()
+            model_name = model_info.get("name", "unknown")
+            model_dim = model_info.get("embedding_dim", "unknown")
+            device = model_info.get("device", "unknown")
+            logger.info(
+                f"✅ Pre-loaded embedding model: {model_name} ({model_dim}D) on {device}"
+            )
+        else:
+            logger.info("⚠️ No custom model loaded, will use ChromaDB default")
 
     return {
         "chroma_client": chroma_client,
@@ -111,23 +134,78 @@ async def initialize_systems_async() -> Dict[str, Any]:
     }
 
 
+def preload_embedding_model() -> bool:
+    """
+    Preload an embedding model for faster development.
+    Tries to use cached models first for speed.
+
+    Returns:
+        True if a model was successfully loaded
+    """
+    logger.info("🚀 Pre-loading embedding model...")
+
+    try:
+        from tools import get_embedding_manager
+
+        embedding_manager = get_embedding_manager()
+
+        # Check if we already have a model loaded from cache
+        model_info = embedding_manager.get_model_info()
+        if model_info and model_info.get("name") != "chromadb-default":
+            logger.info(f"✅ Model already loaded: {model_info.get('name')}")
+            return True
+
+        # Try to load the best available model
+        success = embedding_manager.load_best_available_model()
+        if success:
+            model_info = embedding_manager.get_model_info()
+            logger.info(
+                f"✅ Pre-loaded: {model_info.get('name')} ({model_info.get('embedding_dim')}D)"
+            )
+            return True
+        else:
+            logger.warning("⚠️ No custom models could be loaded")
+            return False
+
+    except Exception as e:
+        logger.error(f"❌ Failed to preload model: {e}")
+        return False
+
+
 def main():
-    """Main server entry point - let FastMCP handle its own asyncio."""
+    """
+    Main server entry point.
+
+    ASYNC DESIGN DECISION:
+    - FastMCP handles its own asyncio event loop internally via mcp.run()
+    - We do NOT wrap mcp.run() in asyncio.run() to avoid event loop conflicts
+    - All MCP tools (@mcp.tool()) are async functions handled by FastMCP
+    - Initialization is synchronous, letting FastMCP manage async operations
+    - This prevents "RuntimeError: cannot be called from a running event loop"
+    """
     try:
         # Log startup information
         log_server_startup()
 
-        # Initialize systems synchronously (FastMCP will handle async)
-        import asyncio
+        # Preload embedding model first for faster user experience
+        logger.info("🔥 Pre-loading embedding model for faster development...")
+        preload_success = preload_embedding_model()
 
-        systems = asyncio.run(initialize_systems_async())
+        if preload_success:
+            logger.info("⚡ Model pre-loaded successfully - development ready!")
+        else:
+            logger.info("⚠️ Model pre-loading failed - will use ChromaDB default")
+
+        # Initialize remaining systems
+        systems = initialize_systems_sync()
 
         logger.info("🎯 FastMCP server ready for connections")
         logger.info("=" * 60)
 
-        # Let FastMCP server handle its own asyncio - don't wrap in asyncio.run()
+        # Import and start FastMCP server - it handles its own event loop
         from tools import mcp
 
+        # FastMCP manages its own asyncio context
         mcp.run()
 
     except KeyboardInterrupt:
