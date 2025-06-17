@@ -99,10 +99,10 @@ async def create_collection(
     """Create a new ChromaDB collection."""
     if not name or not name.strip():
         raise ValueError("Collection name cannot be empty")
-    
+
     name = name.strip()
     client = get_chroma_client()
-    
+
     with OperationContext("create_collection", collection_name=name):
         # Use None instead of empty dict to avoid validation error
         collection = client.create_collection(name=name, metadata=metadata)
@@ -116,10 +116,10 @@ async def delete_collection(name: str) -> str:
     """Delete a ChromaDB collection."""
     if not name or not name.strip():
         raise ValueError("Collection name cannot be empty")
-    
+
     name = name.strip()
     client = get_chroma_client()
-    
+
     with OperationContext("delete_collection", collection_name=name):
         client.delete_collection(name)
         logger.info(f"🗑️ Collection '{name}' deleted successfully")
@@ -137,7 +137,7 @@ async def add_documents(
     """Add documents to a ChromaDB collection with custom embeddings."""
     if not documents:
         raise ValueError("Documents list cannot be empty")
-    
+
     if not collection_name or not collection_name.strip():
         raise ValueError("Collection name cannot be empty")
 
@@ -163,26 +163,27 @@ async def add_documents(
     client = get_chroma_client()
     embedding_manager = get_embedding_manager()
 
-    with OperationContext("add_documents", 
-                         collection_name=collection_name, 
-                         doc_count=len(clean_documents)):
-        
+    with OperationContext(
+        "add_documents", collection_name=collection_name, doc_count=len(clean_documents)
+    ):
+
         collection = client.get_or_create_collection(collection_name)
 
         # Try to use custom embeddings if available
         embeddings = None
         model_name = "ChromaDB default"
-        
+
         if embedding_manager.current_model is not None:
             try:
-                with OperationContext("generate_embeddings", 
-                                    doc_count=len(clean_documents)):
+                with OperationContext(
+                    "generate_embeddings", doc_count=len(clean_documents)
+                ):
                     embeddings = embedding_manager.encode_documents(clean_documents)
-                
+
                 model_info = embedding_manager.get_model_info()
                 model_name = model_info.get("name", "unknown")
                 logger.info(f"✨ Using custom embeddings: {model_name}")
-                
+
             except Exception as e:
                 logger.warning(
                     f"⚠️ Custom embedding failed, falling back to ChromaDB default: {e}"
@@ -202,7 +203,7 @@ async def add_documents(
                 ids=ids[: len(clean_documents)],
                 metadatas=metadatas[: len(clean_documents)] if metadatas else None,  # type: ignore
             )
-        
+
         result_message = f"Added {len(clean_documents)} documents to '{collection_name}' using {model_name} embeddings"
         logger.info(f"📄 {result_message}")
         return result_message
@@ -219,10 +220,10 @@ async def query_collection(
     """Query a ChromaDB collection with semantic search."""
     if not query_texts:
         raise ValueError("Query texts cannot be empty")
-    
+
     if not collection_name or not collection_name.strip():
         raise ValueError("Collection name cannot be empty")
-    
+
     if n_results <= 0:
         raise ValueError("n_results must be greater than 0")
 
@@ -230,21 +231,24 @@ async def query_collection(
     client = get_chroma_client()
     embedding_manager = get_embedding_manager()
 
-    with OperationContext("query_collection", 
-                         collection_name=collection_name, 
-                         query_count=len(query_texts),
-                         n_results=n_results):
-        
+    with OperationContext(
+        "query_collection",
+        collection_name=collection_name,
+        query_count=len(query_texts),
+        n_results=n_results,
+    ):
+
         collection = client.get_collection(collection_name)
 
         # Try to use custom query embeddings if available
         query_embeddings = None
         model_name = "ChromaDB default"
-        
+
         if embedding_manager.current_model is not None and len(query_texts) > 0:
             try:
-                with OperationContext("generate_query_embeddings", 
-                                    query_count=len(query_texts)):
+                with OperationContext(
+                    "generate_query_embeddings", query_count=len(query_texts)
+                ):
                     # Convert to list for encoding
                     embeddings_list = []
                     for query_text in query_texts:
@@ -257,7 +261,7 @@ async def query_collection(
                         model_info = embedding_manager.get_model_info()
                         model_name = model_info.get("name", "unknown")
                         logger.info(f"✨ Using custom query embeddings: {model_name}")
-                        
+
             except Exception as e:
                 logger.warning(
                     f"⚠️ Custom query embedding failed, falling back to ChromaDB default: {e}"
@@ -275,13 +279,17 @@ async def query_collection(
                 query_texts=query_texts,
                 n_results=n_results,
                 where=where,
-            )        # Log results summary
+            )  # Log results summary
         result_dict = dict(results)  # type: ignore
         total_results = 0
-        if result_dict.get('documents') and isinstance(result_dict['documents'], list) and len(result_dict['documents']) > 0:
-            total_results = len(result_dict['documents'][0])
+        if (
+            result_dict.get("documents")
+            and isinstance(result_dict["documents"], list)
+            and len(result_dict["documents"]) > 0
+        ):
+            total_results = len(result_dict["documents"][0])
         logger.info(f"🔍 Query returned {total_results} results using {model_name}")
-        
+
         return result_dict
 
 
@@ -308,14 +316,14 @@ async def configure_embedding_model(model_name: str, force_reload: bool = False)
     """Configure the embedding model to use."""
     if not model_name or not model_name.strip():
         raise ValueError("Model name cannot be empty")
-    
+
     model_name = model_name.strip()
     embedding_manager = get_embedding_manager()
-    
-    with OperationContext("configure_embedding_model", 
-                         model_name=model_name, 
-                         force_reload=force_reload):
-        
+
+    with OperationContext(
+        "configure_embedding_model", model_name=model_name, force_reload=force_reload
+    ):
+
         success = embedding_manager.load_model(model_name, force_reload)
         if success:
             model_info = embedding_manager.get_model_info()
@@ -330,7 +338,9 @@ async def configure_embedding_model(model_name: str, force_reload: bool = False)
                 logger.warning(f"⚠️ {result_message}")
                 return result_message
         else:
-            error_message = f"Failed to load model '{model_name}'. Using ChromaDB default."
+            error_message = (
+                f"Failed to load model '{model_name}'. Using ChromaDB default."
+            )
             logger.error(f"❌ {error_message}")
             raise Exception(error_message)
 
@@ -343,27 +353,29 @@ async def chunk_text_intelligent(
     """Intelligently chunk text for better embedding (Vietnamese optimized)."""
     if not text or not text.strip():
         raise ValueError("Text cannot be empty")
-    
+
     if chunk_size <= 0:
         raise ValueError("Chunk size must be greater than 0")
-        
+
     if overlap < 0:
         raise ValueError("Overlap cannot be negative")
-    
+
     if overlap >= chunk_size:
         raise ValueError("Overlap must be less than chunk size")
 
     # Validate input
     if not isinstance(text, str):
         text = str(text)
-    
+
     text = text.strip()
 
-    with OperationContext("chunk_text_intelligent", 
-                         text_length=len(text), 
-                         chunk_size=chunk_size, 
-                         overlap=overlap):
-        
+    with OperationContext(
+        "chunk_text_intelligent",
+        text_length=len(text),
+        chunk_size=chunk_size,
+        overlap=overlap,
+    ):
+
         # Ensure valid encoding
         try:
             text.encode("utf-8")
@@ -371,7 +383,7 @@ async def chunk_text_intelligent(
             text = text.encode("utf-8", errors="ignore").decode("utf-8")
 
         chunks = _chunk_text_intelligent(text, chunk_size, overlap)
-        
+
         # Validate and clean output chunks
         cleaned_chunks = []
         for chunk in chunks:
@@ -380,7 +392,9 @@ async def chunk_text_intelligent(
                     chunk.encode("utf-8")
                     cleaned_chunks.append(chunk.strip())
                 except UnicodeEncodeError:
-                    cleaned_chunk = chunk.encode("utf-8", errors="ignore").decode("utf-8")
+                    cleaned_chunk = chunk.encode("utf-8", errors="ignore").decode(
+                        "utf-8"
+                    )
                     if cleaned_chunk.strip():
                         cleaned_chunks.append(cleaned_chunk.strip())
 
@@ -394,18 +408,23 @@ async def get_performance_metrics() -> Dict[str, Any]:
     """Get performance metrics for embedding operations."""
     manager = get_embedding_manager()
     error_tracker = get_error_tracker()
-    
+
     metrics = {}
-    
+
     if hasattr(manager, "get_metrics"):
         metrics["embedding_metrics"] = manager.get_metrics()
     else:
-        metrics["embedding_metrics"] = {"message": "Metrics not available", "total_operations": 0}
-    
+        metrics["embedding_metrics"] = {
+            "message": "Metrics not available",
+            "total_operations": 0,
+        }
+
     # Add error metrics
     metrics["error_metrics"] = error_tracker.get_error_summary()
-    
-    logger.info(f"📊 Retrieved performance metrics with {metrics['error_metrics']['total_errors']} total errors")
+
+    logger.info(
+        f"📊 Retrieved performance metrics with {metrics['error_metrics']['total_errors']} total errors"
+    )
     return metrics
 
 
@@ -416,7 +435,9 @@ async def get_model_sizes_info() -> Dict[str, Any]:
     embedding_manager = get_embedding_manager()
     if hasattr(embedding_manager, "get_model_sizes_info"):
         model_info = embedding_manager.get_model_sizes_info()
-        logger.info(f"📏 Retrieved model size info for {len(model_info.get('models', []))} models")
+        logger.info(
+            f"📏 Retrieved model size info for {len(model_info.get('models', []))} models"
+        )
         return model_info
     else:
         return {

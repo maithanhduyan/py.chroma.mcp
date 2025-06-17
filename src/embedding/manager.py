@@ -31,12 +31,12 @@ class EmbeddingManager:
         """Initialize the embedding manager."""
         self.models: Dict[str, Any] = {}  # Cache loaded models
         self.current_model = None
-        self.current_model_name = "chromadb-default"  # Model priority list (fastest to slowest, no HF token required)
+        self.current_model_name = "chromadb-default"
+
+        # Model priority list (fastest to slowest, no HF token required, multilingual preferred)
         self.model_priority = [
             "nomic-ai/nomic-embed-text-v1.5",  # Very lightweight (137MB), no token needed, good performance
-            "sentence-transformers/all-MiniLM-L6-v2",  # Tiny (90MB), very fast, English only
             "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",  # Small (177MB), multilingual
-            "sentence-transformers/all-mpnet-base-v2",  # Good quality (420MB), English only
             "sentence-transformers/paraphrase-multilingual-mpnet-base-v2",  # High quality (1.1GB), multilingual
         ]
 
@@ -401,11 +401,10 @@ class EmbeddingManager:
         Returns:
             Dictionary with model names and their approximate sizes
         """
+
         size_info = {
             "nomic-ai/nomic-embed-text-v1.5": "137MB - Lightweight, good performance, no token needed",
-            "sentence-transformers/all-MiniLM-L6-v2": "90MB - Very fast, English only",
             "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2": "177MB - Fast, multilingual",
-            "sentence-transformers/all-mpnet-base-v2": "420MB - Good quality, English only",
             "sentence-transformers/paraphrase-multilingual-mpnet-base-v2": "1.1GB - High quality, multilingual",
         }
 

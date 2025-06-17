@@ -545,66 +545,83 @@ class TextChunker:
     def _split_vietnamese_sentences(self, text: str) -> List[str]:
         """
         Enhanced Vietnamese sentence splitting with better patterns.
-        
+
         Args:
             text: Vietnamese text to split
-            
+
         Returns:
             List of sentences
         """
         # Normalize text first
-        text = unicodedata.normalize('NFC', text)
-        
+        text = unicodedata.normalize("NFC", text)
+
         # Enhanced Vietnamese sentence patterns
         # Pattern 1: Standard punctuation followed by capital letter or number
-        pattern1 = r'([.!?]+)\s+([A-ZÁÀẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬÉÈẺẼẸÊẾỀỂỄỆÍÌỈĨỊÓÒỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢÚÙỦŨỤƯỨỪỬỮỰÝỲỶỸỴĐ])'
-        
+        pattern1 = r"([.!?]+)\s+([A-ZÁÀẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬÉÈẺẼẸÊẾỀỂỄỆÍÌỈĨỊÓÒỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢÚÙỦŨỤƯỨỪỬỮỰÝỲỶỸỴĐ])"
+
         # Pattern 2: End of sentences
-        pattern2 = r'([.!?]+)(\s*$)'
-        
+        pattern2 = r"([.!?]+)(\s*$)"
+
         # Pattern 3: Numbering (1. 2. etc.)
-        pattern3 = r'([.!?]+)\s+(\d+\.)'
-        
+        pattern3 = r"([.!?]+)\s+(\d+\.)"
+
         # Common Vietnamese discourse markers
         discourse_markers = [
-            'Tuy nhiên', 'Nhưng', 'Mặt khác', 'Bên cạnh đó', 'Ngoài ra',
-            'Đầu tiên', 'Thứ hai', 'Thứ ba', 'Cuối cùng', 'Kết luận',
-            'Tóm lại', 'Ví dụ', 'Chẳng hạn', 'Cụ thể', 'Theo đó', 'Do đó'
+            "Tuy nhiên",
+            "Nhưng",
+            "Mặt khác",
+            "Bên cạnh đó",
+            "Ngoài ra",
+            "Đầu tiên",
+            "Thứ hai",
+            "Thứ ba",
+            "Cuối cùng",
+            "Kết luận",
+            "Tóm lại",
+            "Ví dụ",
+            "Chẳng hạn",
+            "Cụ thể",
+            "Theo đó",
+            "Do đó",
         ]
-        
+
         # Apply main patterns with proper group references
         # Add sentence breaks before discourse markers
         for marker in discourse_markers:
-            marker_pattern = rf'([.!?]+)\s+({re.escape(marker)})'
-            text = re.sub(marker_pattern, r'\1|SENT_BREAK|\2', text)
-        
+            marker_pattern = rf"([.!?]+)\s+({re.escape(marker)})"
+            text = re.sub(marker_pattern, r"\1|SENT_BREAK|\2", text)
+
         # Apply main sentence patterns
-        text = re.sub(pattern1, r'\1|SENT_BREAK|\2', text)
-        text = re.sub(pattern2, r'\1|SENT_BREAK|', text)  # No group 2 for end pattern
-        text = re.sub(pattern3, r'\1|SENT_BREAK|\2', text)
-        
+        text = re.sub(pattern1, r"\1|SENT_BREAK|\2", text)
+        text = re.sub(pattern2, r"\1|SENT_BREAK|", text)  # No group 2 for end pattern
+        text = re.sub(pattern3, r"\1|SENT_BREAK|\2", text)
+
         # Split and clean
-        parts = text.split('|SENT_BREAK|')
+        parts = text.split("|SENT_BREAK|")
         sentences = []
         current_sentence = ""
-        
+
         for part in parts:
             part = part.strip()
             if not part:
                 continue
-                
+
             # Accumulate very short fragments with previous sentence
-            if len(part) < 15 and current_sentence and not any(p in part for p in ['.', '!', '?']):
+            if (
+                len(part) < 15
+                and current_sentence
+                and not any(p in part for p in [".", "!", "?"])
+            ):
                 current_sentence += " " + part
             else:
                 if current_sentence:
                     sentences.append(current_sentence.strip())
                 current_sentence = part
-        
+
         # Add the last sentence
         if current_sentence and current_sentence.strip():
             sentences.append(current_sentence.strip())
-        
+
         # Final filtering and cleaning
         cleaned_sentences = []
         for sentence in sentences:
@@ -612,8 +629,10 @@ class TextChunker:
             # Remove very short fragments and ensure meaningful content
             if sentence and len(sentence) > 10 and any(c.isalpha() for c in sentence):
                 cleaned_sentences.append(sentence)
-        
-        logger.debug(f"🇻🇳 Enhanced Vietnamese sentence splitting: {len(cleaned_sentences)} sentences")
+
+        logger.debug(
+            f"🇻🇳 Enhanced Vietnamese sentence splitting: {len(cleaned_sentences)} sentences"
+        )
         return cleaned_sentences
 
     def _is_semantic_break(self, sentence: str, has_previous: bool) -> bool:

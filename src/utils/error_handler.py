@@ -21,7 +21,7 @@ F = TypeVar("F", bound=Callable[..., Any])
 @dataclass
 class ErrorContext:
     """Context information for error tracking."""
-    
+
     operation_name: str
     error_type: str
     error_message: str
@@ -36,16 +36,16 @@ class ErrorContext:
 
 class ErrorTracker:
     """Centralized error tracking system."""
-    
+
     def __init__(self):
         self.errors: list[ErrorContext] = []
         self._lock = asyncio.Lock()
-    
+
     async def log_error(
-        self, 
-        operation_name: str, 
-        error: Exception, 
-        context: Optional[Dict[str, Any]] = None
+        self,
+        operation_name: str,
+        error: Exception,
+        context: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Log an error with context information."""
         error_context = ErrorContext(
@@ -53,21 +53,21 @@ class ErrorTracker:
             error_type=type(error).__name__,
             error_message=str(error),
             stack_trace=traceback.format_exc(),
-            additional_context=context or {}
+            additional_context=context or {},
         )
-        
+
         async with self._lock:
             self.errors.append(error_context)
-        
+
         logger.error(
             f"❌ {operation_name} failed: {type(error).__name__} - {str(error)}"
         )
-    
+
     def log_error_sync(
-        self, 
-        operation_name: str, 
-        error: Exception, 
-        context: Optional[Dict[str, Any]] = None
+        self,
+        operation_name: str,
+        error: Exception,
+        context: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Synchronous version of log_error."""
         error_context = ErrorContext(
@@ -75,30 +75,31 @@ class ErrorTracker:
             error_type=type(error).__name__,
             error_message=str(error),
             stack_trace=traceback.format_exc(),
-            additional_context=context or {}
+            additional_context=context or {},
         )
-        
+
         self.errors.append(error_context)
-        
+
         logger.error(
             f"❌ {operation_name} failed: {type(error).__name__} - {str(error)}"
         )
-    
+
     def get_error_summary(self) -> Dict[str, Any]:
         """Get summary of all tracked errors."""
         if not self.errors:
             return {"total_errors": 0}
-        
+
         error_types = {}
         operations_with_errors = {}
-        
+
         for error in self.errors:
             # Count by error type
             error_types[error.error_type] = error_types.get(error.error_type, 0) + 1
             # Count by operation
-            operations_with_errors[error.operation_name] = \
+            operations_with_errors[error.operation_name] = (
                 operations_with_errors.get(error.operation_name, 0) + 1
-        
+            )
+
         return {
             "total_errors": len(self.errors),
             "error_types": error_types,
@@ -108,10 +109,10 @@ class ErrorTracker:
                     "operation": error.operation_name,
                     "type": error.error_type,
                     "message": error.error_message,
-                    "timestamp": error.timestamp
+                    "timestamp": error.timestamp,
                 }
                 for error in self.errors[-5:]  # Last 5 errors
-            ]
+            ],
         }
 
 
@@ -127,126 +128,141 @@ def get_error_tracker() -> ErrorTracker:
 def handle_mcp_tool_errors(operation_name: Optional[str] = None):
     """
     Decorator để tự động handle errors cho MCP tools.
-    
+
     Args:
         operation_name: Tên operation để track. Nếu None sẽ dùng function name.
     """
+
     def decorator(func: F) -> F:
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
             op_name = operation_name or func.__name__
             error_tracker = get_error_tracker()
             start_time = time.time()
-            
+
             try:
                 logger.info(f"🚀 Starting {op_name}")
                 result = await func(*args, **kwargs)
-                
+
                 execution_time = time.time() - start_time
                 logger.info(f"✅ {op_name} completed in {execution_time:.2f}s")
-                
+
                 return result
-                
+
             except Exception as e:
                 execution_time = time.time() - start_time
-                
+
                 # Log error với context
-                await error_tracker.log_error(op_name, e, {
-                    "function": func.__name__,
-                    "args": str(args)[:200],  # Truncate args for logging
-                    "kwargs": str(kwargs)[:200],
-                    "execution_time": execution_time
-                })
-                
+                await error_tracker.log_error(
+                    op_name,
+                    e,
+                    {
+                        "function": func.__name__,
+                        "args": str(args)[:200],  # Truncate args for logging
+                        "kwargs": str(kwargs)[:200],
+                        "execution_time": execution_time,
+                    },
+                )
+
                 # Re-raise với enhanced error message
                 raise Exception(f"{op_name} failed: {str(e)}") from e
-        
+
         @wraps(func)
         def sync_wrapper(*args, **kwargs):
             op_name = operation_name or func.__name__
             error_tracker = get_error_tracker()
             start_time = time.time()
-            
+
             try:
                 logger.info(f"🚀 Starting {op_name}")
                 result = func(*args, **kwargs)
-                
+
                 execution_time = time.time() - start_time
                 logger.info(f"✅ {op_name} completed in {execution_time:.2f}s")
-                
+
                 return result
-                
+
             except Exception as e:
                 execution_time = time.time() - start_time
-                
+
                 # Log error với context
-                error_tracker.log_error_sync(op_name, e, {
-                    "function": func.__name__,
-                    "args": str(args)[:200],
-                    "kwargs": str(kwargs)[:200],
-                    "execution_time": execution_time
-                })
-                
+                error_tracker.log_error_sync(
+                    op_name,
+                    e,
+                    {
+                        "function": func.__name__,
+                        "args": str(args)[:200],
+                        "kwargs": str(kwargs)[:200],
+                        "execution_time": execution_time,
+                    },
+                )
+
                 # Re-raise với enhanced error message
                 raise Exception(f"{op_name} failed: {str(e)}") from e
-        
+
         # Return appropriate wrapper based on function type
         if asyncio.iscoroutinefunction(func):
             return async_wrapper  # type: ignore
         else:
             return sync_wrapper  # type: ignore
-    
+
     return decorator
 
 
 def log_operation_start(operation_name: str, **context) -> None:
     """Log the start of an operation."""
     context_str = ", ".join(f"{k}={v}" for k, v in context.items())
-    logger.info(f"🚀 Starting {operation_name}" + (f" ({context_str})" if context_str else ""))
+    logger.info(
+        f"🚀 Starting {operation_name}" + (f" ({context_str})" if context_str else "")
+    )
 
 
 def log_operation_success(operation_name: str, duration: float, **context) -> None:
     """Log successful completion of an operation."""
     context_str = ", ".join(f"{k}={v}" for k, v in context.items())
     logger.info(
-        f"✅ {operation_name} completed in {duration:.2f}s" + 
-        (f" ({context_str})" if context_str else "")
+        f"✅ {operation_name} completed in {duration:.2f}s"
+        + (f" ({context_str})" if context_str else "")
     )
 
 
-def log_operation_error(operation_name: str, error: Exception, duration: float, **context) -> None:
+def log_operation_error(
+    operation_name: str, error: Exception, duration: float, **context
+) -> None:
     """Log error in an operation."""
     context_str = ", ".join(f"{k}={v}" for k, v in context.items())
     logger.error(
-        f"❌ {operation_name} failed after {duration:.2f}s: {type(error).__name__} - {str(error)}" +
-        (f" ({context_str})" if context_str else "")
+        f"❌ {operation_name} failed after {duration:.2f}s: {type(error).__name__} - {str(error)}"
+        + (f" ({context_str})" if context_str else "")
     )
 
 
 class OperationContext:
     """Context manager for operation logging."""
-    
+
     def __init__(self, operation_name: str, **context):
         self.operation_name = operation_name
         self.context = context
         self.start_time = None
-    
+
     def __enter__(self):
         self.start_time = time.time()
         log_operation_start(self.operation_name, **self.context)
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.start_time is None:
             return False
-            
+
         duration = time.time() - self.start_time
-        
+
         if exc_type is None:
             log_operation_success(self.operation_name, duration, **self.context)
         else:
             log_operation_error(self.operation_name, exc_val, duration, **self.context)
             # Track error
-            get_error_tracker().log_error_sync(self.operation_name, exc_val, self.context)
-        
+            get_error_tracker().log_error_sync(
+                self.operation_name, exc_val, self.context
+            )
+
         return False  # Don't suppress exceptions
