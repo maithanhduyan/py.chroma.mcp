@@ -6,9 +6,8 @@ Provides common utilities for metrics, validation, and helper functions.
 """
 
 from .metrics import (
-    PerformanceMetrics,
-    QualityMetrics,
     MetricsCollector,
+    get_metrics_collector,
     benchmark_function,
     measure_memory_usage,
     track_execution_time,
@@ -24,11 +23,21 @@ from .validators import (
     validator,
 )
 
+from .error_handler import (
+    ErrorContext,
+    ErrorTracker,
+    get_error_tracker,
+    handle_mcp_tool_errors,
+    log_operation_start,
+    log_operation_success,
+    log_operation_error,
+    OperationContext,
+)
+
 __all__ = [
     # Metrics
-    "PerformanceMetrics",
-    "QualityMetrics",
     "MetricsCollector",
+    "get_metrics_collector",
     "benchmark_function",
     "measure_memory_usage",
     "track_execution_time",
@@ -40,6 +49,15 @@ __all__ = [
     "QueryValidator",
     "ValidationOrchestrator",
     "validator",
+    # Error handling
+    "ErrorContext",
+    "ErrorTracker",
+    "get_error_tracker",
+    "handle_mcp_tool_errors",
+    "log_operation_start",
+    "log_operation_success",
+    "log_operation_error",
+    "OperationContext",
 ]
 
 # Version info

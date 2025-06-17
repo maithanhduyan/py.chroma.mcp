@@ -16,6 +16,7 @@ list of tools:
 - configure_embedding_model()
 - chunk_text_intelligent()
 - get_model_sizes_info()
+- get_performance_metrics()
 """
 
 import logging
@@ -31,9 +32,12 @@ import config
 from embedding import EmbeddingManager
 from embedding.chunker import chunk_text_intelligent as _chunk_text_intelligent
 from utils.metrics import (
-    track_execution_time,
-    measure_memory_usage,
     MetricsCollector,
+)
+from utils.error_handler import (
+    handle_mcp_tool_errors,
+    get_error_tracker,
+    OperationContext,
 )
 
 HAS_METRICS = True
@@ -70,53 +74,60 @@ def get_embedding_manager():
 
 
 @mcp.tool()
+@handle_mcp_tool_errors("echo")
 async def echo(message: str) -> str:
     """Echo back the input message (useful for testing)."""
     return f"Echo: {message}"
 
 
 @mcp.tool()
+@handle_mcp_tool_errors("list_collections")
 async def list_collections() -> List[str]:
     """List all collection names in the ChromaDB."""
     client = get_chroma_client()
-    try:
-        collections = client.list_collections()
-        if not collections:
-            return []
-        return [coll.name for coll in collections]
-    except Exception as e:
-        logger.error(f"Failed to list collections: {e}")
-        raise Exception(f"Failed to list collections: {str(e)}")
+    collections = client.list_collections()
+    collection_names = [coll.name for coll in collections] if collections else []
+    logger.info(f"📚 Found {len(collection_names)} collections")
+    return collection_names
 
 
 @mcp.tool()
+@handle_mcp_tool_errors("create_collection")
 async def create_collection(
     name: str, metadata: Optional[Dict[str, Any]] = None
 ) -> str:
     """Create a new ChromaDB collection."""
+    if not name or not name.strip():
+        raise ValueError("Collection name cannot be empty")
+    
+    name = name.strip()
     client = get_chroma_client()
-    try:
+    
+    with OperationContext("create_collection", collection_name=name):
         # Use None instead of empty dict to avoid validation error
         collection = client.create_collection(name=name, metadata=metadata)
+        logger.info(f"✨ Collection '{name}' created successfully")
         return f"Collection '{name}' created successfully"
-    except Exception as e:
-        logger.error(f"Failed to create collection '{name}': {e}")
-        raise Exception(f"Failed to create collection '{name}': {str(e)}")
 
 
 @mcp.tool()
+@handle_mcp_tool_errors("delete_collection")
 async def delete_collection(name: str) -> str:
     """Delete a ChromaDB collection."""
+    if not name or not name.strip():
+        raise ValueError("Collection name cannot be empty")
+    
+    name = name.strip()
     client = get_chroma_client()
-    try:
+    
+    with OperationContext("delete_collection", collection_name=name):
         client.delete_collection(name)
+        logger.info(f"🗑️ Collection '{name}' deleted successfully")
         return f"Collection '{name}' deleted successfully"
-    except Exception as e:
-        logger.error(f"Failed to delete collection '{name}': {e}")
-        raise Exception(f"Failed to delete collection '{name}': {str(e)}")
 
 
 @mcp.tool()
+@handle_mcp_tool_errors("add_documents")
 async def add_documents(
     collection_name: str,
     documents: List[str],
@@ -126,6 +137,11 @@ async def add_documents(
     """Add documents to a ChromaDB collection with custom embeddings."""
     if not documents:
         raise ValueError("Documents list cannot be empty")
+    
+    if not collection_name or not collection_name.strip():
+        raise ValueError("Collection name cannot be empty")
+
+    collection_name = collection_name.strip()
 
     # Clean and validate documents
     clean_documents = []
@@ -147,20 +163,29 @@ async def add_documents(
     client = get_chroma_client()
     embedding_manager = get_embedding_manager()
 
-    try:
+    with OperationContext("add_documents", 
+                         collection_name=collection_name, 
+                         doc_count=len(clean_documents)):
+        
         collection = client.get_or_create_collection(collection_name)
 
         # Try to use custom embeddings if available
         embeddings = None
+        model_name = "ChromaDB default"
+        
         if embedding_manager.current_model is not None:
             try:
-                embeddings = embedding_manager.encode_documents(clean_documents)
+                with OperationContext("generate_embeddings", 
+                                    doc_count=len(clean_documents)):
+                    embeddings = embedding_manager.encode_documents(clean_documents)
+                
                 model_info = embedding_manager.get_model_info()
                 model_name = model_info.get("name", "unknown")
-                logger.info(f"Using custom embeddings: {model_name}")
+                logger.info(f"✨ Using custom embeddings: {model_name}")
+                
             except Exception as e:
                 logger.warning(
-                    f"Custom embedding failed, falling back to ChromaDB default: {e}"
+                    f"⚠️ Custom embedding failed, falling back to ChromaDB default: {e}"
                 )
 
         # Add documents with or without custom embeddings
@@ -171,23 +196,20 @@ async def add_documents(
                 ids=ids[: len(clean_documents)],
                 metadatas=metadatas[: len(clean_documents)] if metadatas else None,  # type: ignore
             )
-            model_info = embedding_manager.get_model_info()
-            model_name = model_info.get("name", "unknown")
-            return f"Added {len(clean_documents)} documents to '{collection_name}' using {model_name} embeddings"
         else:
             collection.add(
                 documents=clean_documents,
                 ids=ids[: len(clean_documents)],
                 metadatas=metadatas[: len(clean_documents)] if metadatas else None,  # type: ignore
             )
-            return f"Added {len(clean_documents)} documents to '{collection_name}' using ChromaDB default embeddings"
-
-    except Exception as e:
-        logger.error(f"Failed to add documents to '{collection_name}': {e}")
-        raise Exception(f"Failed to add documents: {str(e)}")
+        
+        result_message = f"Added {len(clean_documents)} documents to '{collection_name}' using {model_name} embeddings"
+        logger.info(f"📄 {result_message}")
+        return result_message
 
 
 @mcp.tool()
+@handle_mcp_tool_errors("query_collection")
 async def query_collection(
     collection_name: str,
     query_texts: List[str],
@@ -197,32 +219,48 @@ async def query_collection(
     """Query a ChromaDB collection with semantic search."""
     if not query_texts:
         raise ValueError("Query texts cannot be empty")
+    
+    if not collection_name or not collection_name.strip():
+        raise ValueError("Collection name cannot be empty")
+    
+    if n_results <= 0:
+        raise ValueError("n_results must be greater than 0")
 
+    collection_name = collection_name.strip()
     client = get_chroma_client()
     embedding_manager = get_embedding_manager()
 
-    try:
+    with OperationContext("query_collection", 
+                         collection_name=collection_name, 
+                         query_count=len(query_texts),
+                         n_results=n_results):
+        
         collection = client.get_collection(collection_name)
 
         # Try to use custom query embeddings if available
         query_embeddings = None
+        model_name = "ChromaDB default"
+        
         if embedding_manager.current_model is not None and len(query_texts) > 0:
             try:
-                # Convert to list for encoding
-                embeddings_list = []
-                for query_text in query_texts:
-                    embedding = embedding_manager.encode_query(query_text)
-                    if embedding:
-                        embeddings_list.append(embedding)
+                with OperationContext("generate_query_embeddings", 
+                                    query_count=len(query_texts)):
+                    # Convert to list for encoding
+                    embeddings_list = []
+                    for query_text in query_texts:
+                        embedding = embedding_manager.encode_query(query_text)
+                        if embedding:
+                            embeddings_list.append(embedding)
 
-                if embeddings_list:
-                    query_embeddings = embeddings_list
-                    model_info = embedding_manager.get_model_info()
-                    model_name = model_info.get("name", "unknown")
-                    logger.info(f"Using custom query embeddings: {model_name}")
+                    if embeddings_list:
+                        query_embeddings = embeddings_list
+                        model_info = embedding_manager.get_model_info()
+                        model_name = model_info.get("name", "unknown")
+                        logger.info(f"✨ Using custom query embeddings: {model_name}")
+                        
             except Exception as e:
                 logger.warning(
-                    f"Custom query embedding failed, falling back to ChromaDB default: {e}"
+                    f"⚠️ Custom query embedding failed, falling back to ChromaDB default: {e}"
                 )
 
         # Perform query
@@ -237,76 +275,104 @@ async def query_collection(
                 query_texts=query_texts,
                 n_results=n_results,
                 where=where,
-            )
-
-        # Convert ChromaDB QueryResult to dict for JSON serialization
-        return dict(results)  # type: ignore
-
-    except Exception as e:
-        logger.error(f"Failed to query collection '{collection_name}': {e}")
-        raise Exception(f"Failed to query collection: {str(e)}")
+            )        # Log results summary
+        result_dict = dict(results)  # type: ignore
+        total_results = 0
+        if result_dict.get('documents') and isinstance(result_dict['documents'], list) and len(result_dict['documents']) > 0:
+            total_results = len(result_dict['documents'][0])
+        logger.info(f"🔍 Query returned {total_results} results using {model_name}")
+        
+        return result_dict
 
 
 ##### Embedding Management Tools #####
 
 
 @mcp.tool()
+@handle_mcp_tool_errors("get_embedding_model_info")
 async def get_embedding_model_info() -> Dict[str, Any]:
     """Get information about current embedding model."""
     embedding_manager = get_embedding_manager()
-    try:
-        model_info = embedding_manager.get_model_info()
-        if model_info:
-            # Return the dictionary as-is since get_model_info already returns a properly formatted dict
-            return model_info
-        else:
-            return {"error": "No model currently loaded"}
-    except Exception as e:
-        logger.error(f"Failed to get embedding model info: {e}")
-        return {"error": f"Failed to get model info: {str(e)}"}
+    model_info = embedding_manager.get_model_info()
+    if model_info:
+        logger.info(f"📊 Current model: {model_info.get('name', 'unknown')}")
+        return model_info
+    else:
+        logger.warning("⚠️ No model currently loaded")
+        return {"error": "No model currently loaded"}
 
 
 @mcp.tool()
+@handle_mcp_tool_errors("configure_embedding_model")
 async def configure_embedding_model(model_name: str, force_reload: bool = False) -> str:
     """Configure the embedding model to use."""
+    if not model_name or not model_name.strip():
+        raise ValueError("Model name cannot be empty")
+    
+    model_name = model_name.strip()
     embedding_manager = get_embedding_manager()
-    try:
+    
+    with OperationContext("configure_embedding_model", 
+                         model_name=model_name, 
+                         force_reload=force_reload):
+        
         success = embedding_manager.load_model(model_name, force_reload)
         if success:
             model_info = embedding_manager.get_model_info()
             if model_info:
                 model_name_info = model_info.get("name", model_name)
                 dimension = model_info.get("embedding_dim", "unknown")
-                return f"Successfully configured embedding model: {model_name_info} (dim: {dimension})"
+                result_message = f"Successfully configured embedding model: {model_name_info} (dim: {dimension})"
+                logger.info(f"🎯 {result_message}")
+                return result_message
             else:
-                return f"Model loaded but info unavailable: {model_name}"
+                result_message = f"Model loaded but info unavailable: {model_name}"
+                logger.warning(f"⚠️ {result_message}")
+                return result_message
         else:
-            return f"Failed to load model '{model_name}'. Using ChromaDB default."
-    except Exception as e:
-        logger.error(f"Failed to configure embedding model: {e}")
-        raise Exception(f"Failed to configure embedding model: {str(e)}")
+            error_message = f"Failed to load model '{model_name}'. Using ChromaDB default."
+            logger.error(f"❌ {error_message}")
+            raise Exception(error_message)
 
 
 @mcp.tool()
+@handle_mcp_tool_errors("chunk_text_intelligent")
 async def chunk_text_intelligent(
     text: str, chunk_size: int = 400, overlap: int = 50
 ) -> List[str]:
     """Intelligently chunk text for better embedding (Vietnamese optimized)."""
-    embedding_manager = get_embedding_manager()
-    try:
-        # Validate input
-        if not isinstance(text, str):
-            text = str(text)
+    if not text or not text.strip():
+        raise ValueError("Text cannot be empty")
+    
+    if chunk_size <= 0:
+        raise ValueError("Chunk size must be greater than 0")
+        
+    if overlap < 0:
+        raise ValueError("Overlap cannot be negative")
+    
+    if overlap >= chunk_size:
+        raise ValueError("Overlap must be less than chunk size")
 
+    # Validate input
+    if not isinstance(text, str):
+        text = str(text)
+    
+    text = text.strip()
+
+    with OperationContext("chunk_text_intelligent", 
+                         text_length=len(text), 
+                         chunk_size=chunk_size, 
+                         overlap=overlap):
+        
         # Ensure valid encoding
         try:
             text.encode("utf-8")
         except UnicodeEncodeError:
             text = text.encode("utf-8", errors="ignore").decode("utf-8")
 
-        chunks = _chunk_text_intelligent(
-            text, chunk_size, overlap
-        )  # Validate and clean output chunks
+        chunks = _chunk_text_intelligent(text, chunk_size, overlap)
+        
+        # Validate and clean output chunks
         cleaned_chunks = []
         for chunk in chunks:
             if isinstance(chunk, str) and chunk.strip():
@@ -314,43 +380,49 @@ async def chunk_text_intelligent(
                     chunk.encode("utf-8")
                     cleaned_chunks.append(chunk.strip())
                 except UnicodeEncodeError:
-                    cleaned_chunk = chunk.encode("utf-8", errors="ignore").decode(
-                        "utf-8"
-                    )
+                    cleaned_chunk = chunk.encode("utf-8", errors="ignore").decode("utf-8")
                     if cleaned_chunk.strip():
                         cleaned_chunks.append(cleaned_chunk.strip())
 
+        logger.info(f"📝 Text chunked into {len(cleaned_chunks)} chunks")
         return cleaned_chunks
-    except Exception as e:
-        logger.error(f"Failed to chunk text: {e}")
-        raise Exception(f"Failed to chunk text: {str(e)}")
 
 
 @mcp.tool()
+@handle_mcp_tool_errors("get_performance_metrics")
 async def get_performance_metrics() -> Dict[str, Any]:
     """Get performance metrics for embedding operations."""
     manager = get_embedding_manager()
+    error_tracker = get_error_tracker()
+    
+    metrics = {}
+    
     if hasattr(manager, "get_metrics"):
-        return manager.get_metrics()
+        metrics["embedding_metrics"] = manager.get_metrics()
     else:
-        return {"message": "Metrics not available", "total_operations": 0}
+        metrics["embedding_metrics"] = {"message": "Metrics not available", "total_operations": 0}
+    
+    # Add error metrics
+    metrics["error_metrics"] = error_tracker.get_error_summary()
+    
+    logger.info(f"📊 Retrieved performance metrics with {metrics['error_metrics']['total_errors']} total errors")
+    return metrics
 
 
 @mcp.tool()
+@handle_mcp_tool_errors("get_model_sizes_info")
 async def get_model_sizes_info() -> Dict[str, Any]:
     """Get information about available embedding models and their sizes."""
     embedding_manager = get_embedding_manager()
-    try:
-        if hasattr(embedding_manager, "get_model_sizes_info"):
-            return embedding_manager.get_model_sizes_info()
-        else:
-            return {
-                "message": "Model size information not available",
-                "recommendation": "Use smaller models for faster loading",
-            }
-    except Exception as e:
-        logger.error(f"Failed to get model sizes info: {e}")
-        return {"error": f"Failed to get model sizes: {str(e)}"}
+    if hasattr(embedding_manager, "get_model_sizes_info"):
+        model_info = embedding_manager.get_model_sizes_info()
+        logger.info(f"📏 Retrieved model size info for {len(model_info.get('models', []))} models")
+        return model_info
+    else:
+        return {
+            "message": "Model size information not available",
+            "recommendation": "Use smaller models for faster loading",
+        }
 
 
 ##### Utility Functions (for compatibility) #####

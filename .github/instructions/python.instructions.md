@@ -82,6 +82,7 @@ Luôn sử dụng thư mục `tests` để viết test.
   assert result.is_valid == True
   assert len(result.errors) == 0
   ```
+- Delete "test_*.py" file after testing.
 
 ## Error Recovery Strategies
 - Implement graceful degradation when dependencies missing
