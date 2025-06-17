@@ -18,6 +18,9 @@ from utils.metrics import (
     MetricsCollector,
 )
 
+# Import batch processor for optimization (will be imported when needed)
+# from .batch_processor import BatchProcessor
+
 logger = logging.getLogger(__name__)
 
 
@@ -48,6 +51,8 @@ class EmbeddingManager:
             "encode_documents": 0,
             "encode_query": 0,
         }
+        # Initialize batch processor for optimization
+        self.batch_processor: Optional[Any] = None
 
     def load_model(self, model_name: str, force_reload: bool = False) -> bool:
         """
@@ -100,6 +105,9 @@ class EmbeddingManager:
             self.current_model = self.models[model_name]
             self.current_model_name = model_name
             logger.info(f"✅ Using cached model: {model_name}")
+
+            # Initialize batch processor with current model
+            self._initialize_batch_processor()
             return True
 
         try:
@@ -130,6 +138,9 @@ class EmbeddingManager:
             self.current_model = model
             self.current_model_name = model_name
 
+            # Initialize batch processor with new model
+            self._initialize_batch_processor()
+
             logger.info(f"✅ Successfully loaded model: {model_name} on {device}")
             logger.info(f"💾 Model cached to: {cache_dir}")
             return True
@@ -137,6 +148,17 @@ class EmbeddingManager:
         except Exception as e:
             logger.error(f"❌ Failed to load model {model_name}: {e}")
             return False
+
+    def _initialize_batch_processor(self) -> None:
+        """Initialize the batch processor with the current model."""
+        if self.current_model is not None:
+            # Import here to avoid circular dependency
+            from .batch_processor import BatchProcessor
+
+            self.batch_processor = BatchProcessor(self, cache_size=10000)
+            logger.debug(
+                "🚀 Batch processor initialized for optimized embedding processing"
+            )
 
     def load_best_available_model(self) -> bool:
         """
@@ -163,7 +185,10 @@ class EmbeddingManager:
         return False
 
     def encode_documents(
-        self, texts: List[str], normalize: bool = True
+        self,
+        texts: List[str],
+        normalize: bool = True,
+        use_batch_optimization: bool = True,
     ) -> Optional[List[List[float]]]:
         """
         Encode a list of documents into embeddings.
@@ -171,14 +196,44 @@ class EmbeddingManager:
         Args:
             texts: List of texts to encode
             normalize: Whether to normalize embeddings
+            use_batch_optimization: Whether to use batch processing optimization
 
         Returns:
             List of embeddings or None if no model available"""
         with track_execution_time("encode_documents"):
-            result = self._do_encode_documents(texts, normalize)
-            if result is not None:
-                self.operation_counts["encode_documents"] += 1
-            return result
+            # Use batch processor if available and requested
+            if use_batch_optimization and self.batch_processor is not None:
+                logger.debug(
+                    f"🚀 Using optimized batch processing for {len(texts)} documents"
+                )
+                # Note: batch processor is async, but we'll call it synchronously for now
+                # In a real async environment, this would be awaited
+                import asyncio
+
+                try:
+                    loop = asyncio.get_event_loop()
+                    result = loop.run_until_complete(
+                        self.batch_processor.encode_documents_optimized(
+                            texts, normalize
+                        )
+                    )
+                except RuntimeError:
+                    # No event loop running, create one
+                    result = asyncio.run(
+                        self.batch_processor.encode_documents_optimized(
+                            texts, normalize
+                        )
+                    )
+
+                if result is not None:
+                    self.operation_counts["encode_documents"] += 1
+                return result
+            else:
+                # Fall back to original implementation
+                result = self._do_encode_documents(texts, normalize)
+                if result is not None:
+                    self.operation_counts["encode_documents"] += 1
+                return result
 
     def _do_encode_documents(
         self, texts: List[str], normalize: bool = True
@@ -211,19 +266,36 @@ class EmbeddingManager:
             logger.error(f"❌ Failed to encode documents: {e}")
             return None
 
-    def encode_query(self, query: str, normalize: bool = True) -> Optional[List[float]]:
+    def encode_query(
+        self, query: str, normalize: bool = True, use_cache: bool = True
+    ) -> Optional[List[float]]:
         """
         Encode a single query into embedding.
 
         Args:
             query: Query text to encode
             normalize: Whether to normalize embedding
+            use_cache: Whether to use cache for this query
 
         Returns:
             Query embedding or None if no model available
         """
         with track_execution_time("encode_query"):
+            # Try cache first if batch processor is available
+            if use_cache and self.batch_processor is not None:
+                cached_embedding = self.batch_processor.cache.get(query)
+                if cached_embedding is not None:
+                    logger.debug(f"🎯 Cache hit for query: '{query[:50]}...'")
+                    self.operation_counts["encode_query"] += 1
+                    return cached_embedding
+
+            # Encode the query
             result = self._do_encode_query(query, normalize)
+
+            # Cache the result if batch processor is available
+            if result is not None and use_cache and self.batch_processor is not None:
+                self.batch_processor.cache.set(query, result)
+
             if result is not None:
                 self.operation_counts["encode_query"] += 1
             return result
@@ -322,7 +394,35 @@ class EmbeddingManager:
                 "total_custom_operations": sum(self.operation_counts.values()),
             }
         )
+
+        # Add batch processing metrics if available
+        if self.batch_processor is not None:
+            batch_metrics = self.batch_processor.get_performance_metrics()
+            base_metrics.update({"batch_processing_optimization": batch_metrics})
+
         return base_metrics
+
+    def clear_embedding_cache(self) -> Optional[Dict[str, int]]:
+        """
+        Clear the embedding cache if batch processor is available.
+
+        Returns:
+            Cache statistics before clearing, or None if not available
+        """
+        if self.batch_processor is not None:
+            return self.batch_processor.clear_cache()
+        return None
+
+    def get_cache_stats(self) -> Optional[Dict[str, Any]]:
+        """
+        Get embedding cache statistics.
+
+        Returns:
+            Cache statistics or None if not available
+        """
+        if self.batch_processor is not None:
+            return self.batch_processor.cache.get_stats()
+        return None
 
     def intelligent_chunk_text(
         self, text: str, chunk_size: int = 400, overlap: int = 50

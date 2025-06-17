@@ -19,6 +19,9 @@ from .manager import (
     EmbeddingManager,
 )
 
+# Batch processor imports removed to avoid circular dependency
+# Can be imported directly as: from embedding.batch_processor import BatchProcessor
+
 from .chunker import (
     TextChunker,
     ChunkingStrategy,
@@ -28,9 +31,12 @@ from .chunker import (
 )
 
 __all__ = [
-    # Model management
+    # Manager
     "EmbeddingManager",
-    # Text chunking
+    # Batch Processing - import directly from embedding.batch_processor
+    # "BatchProcessor",
+    # "EmbeddingCache",
+    # Chunking
     "TextChunker",
     "ChunkingStrategy",
     "chunk_text_intelligent",

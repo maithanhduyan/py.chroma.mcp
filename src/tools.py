@@ -17,6 +17,9 @@ list of tools:
 - chunk_text_intelligent()
 - get_model_sizes_info()
 - get_performance_metrics()
+- clear_embedding_cache()
+- get_cache_stats()
+- batch_process_documents()
 """
 
 import logging
@@ -65,7 +68,16 @@ def get_embedding_manager():
     global _embedding_manager
     if _embedding_manager is None:
         _embedding_manager = EmbeddingManager()
-        # Load default small model asynchronously when needed
+        # Ensure model is loaded for consistent embeddings
+        if _embedding_manager.current_model is None:
+            logger.info("🔄 Loading embedding model for MCP tools...")
+            success = _embedding_manager.load_best_available_model()
+            if success:
+                logger.info("✅ Embedding model loaded successfully for MCP tools")
+            else:
+                logger.warning(
+                    "⚠️ No custom embedding model available, using ChromaDB default"
+                )
         logger.debug("🧠 EmbeddingManager initialized")
     return _embedding_manager
 
@@ -167,9 +179,9 @@ async def add_documents(
         "add_documents", collection_name=collection_name, doc_count=len(clean_documents)
     ):
 
-        collection = client.get_or_create_collection(collection_name)
-
-        # Try to use custom embeddings if available
+        collection = client.get_or_create_collection(
+            collection_name
+        )  # Force use custom embeddings if model is available
         embeddings = None
         model_name = "ChromaDB default"
 
@@ -178,7 +190,10 @@ async def add_documents(
                 with OperationContext(
                     "generate_embeddings", doc_count=len(clean_documents)
                 ):
-                    embeddings = embedding_manager.encode_documents(clean_documents)
+                    # Force batch optimization to False to use direct model encoding
+                    embeddings = embedding_manager.encode_documents(
+                        clean_documents, normalize=True, use_batch_optimization=False
+                    )
 
                 model_info = embedding_manager.get_model_info()
                 model_name = model_info.get("name", "unknown")
@@ -188,6 +203,8 @@ async def add_documents(
                 logger.warning(
                     f"⚠️ Custom embedding failed, falling back to ChromaDB default: {e}"
                 )
+                # Set embeddings to None to use ChromaDB default
+                embeddings = None
 
         # Add documents with or without custom embeddings
         if embeddings is not None:
@@ -238,9 +255,9 @@ async def query_collection(
         n_results=n_results,
     ):
 
-        collection = client.get_collection(collection_name)
-
-        # Try to use custom query embeddings if available
+        collection = client.get_collection(
+            collection_name
+        )  # Force use custom query embeddings if available
         query_embeddings = None
         model_name = "ChromaDB default"
 
@@ -252,7 +269,10 @@ async def query_collection(
                     # Convert to list for encoding
                     embeddings_list = []
                     for query_text in query_texts:
-                        embedding = embedding_manager.encode_query(query_text)
+                        # Force use direct encoding without cache for testing
+                        embedding = embedding_manager.encode_query(
+                            query_text, normalize=True, use_cache=False
+                        )
                         if embedding:
                             embeddings_list.append(embedding)
 
@@ -261,11 +281,14 @@ async def query_collection(
                         model_info = embedding_manager.get_model_info()
                         model_name = model_info.get("name", "unknown")
                         logger.info(f"✨ Using custom query embeddings: {model_name}")
+                    else:
+                        logger.warning("⚠️ No valid query embeddings generated")
 
             except Exception as e:
                 logger.warning(
                     f"⚠️ Custom query embedding failed, falling back to ChromaDB default: {e}"
                 )
+                query_embeddings = None
 
         # Perform query
         if query_embeddings:
@@ -404,75 +427,98 @@ async def chunk_text_intelligent(
 
 @mcp.tool()
 @handle_mcp_tool_errors("get_performance_metrics")
-async def get_performance_metrics() -> Dict[str, Any]:
+async def get_performance_metrics() -> Any:
     """Get performance metrics for embedding operations."""
-    manager = get_embedding_manager()
-    error_tracker = get_error_tracker()
+    embedding_manager = get_embedding_manager()
 
-    metrics = {}
+    with OperationContext("get_performance_metrics"):
+        metrics = embedding_manager.get_metrics()
 
-    if hasattr(manager, "get_metrics"):
-        metrics["embedding_metrics"] = manager.get_metrics()
-    else:
-        metrics["embedding_metrics"] = {
-            "message": "Metrics not available",
-            "total_operations": 0,
+        logger.info("📊 Retrieved performance metrics")
+        return {
+            "message": "Performance metrics retrieved successfully",
+            "metrics": metrics,
         }
-
-    # Add error metrics
-    metrics["error_metrics"] = error_tracker.get_error_summary()
-
-    logger.info(
-        f"📊 Retrieved performance metrics with {metrics['error_metrics']['total_errors']} total errors"
-    )
-    return metrics
 
 
 @mcp.tool()
-@handle_mcp_tool_errors("get_model_sizes_info")
-async def get_model_sizes_info() -> Dict[str, Any]:
-    """Get information about available embedding models and their sizes."""
+@handle_mcp_tool_errors("clear_embedding_cache")
+async def clear_embedding_cache() -> str:
+    """Clear the embedding cache to free memory."""
     embedding_manager = get_embedding_manager()
-    if hasattr(embedding_manager, "get_model_sizes_info"):
-        model_info = embedding_manager.get_model_sizes_info()
-        logger.info(
-            f"📏 Retrieved model size info for {len(model_info.get('models', []))} models"
+
+    with OperationContext("clear_embedding_cache"):
+        cache_stats = embedding_manager.clear_embedding_cache()
+
+        if cache_stats is not None:
+            message = f"Embedding cache cleared: {cache_stats['cleared_entries']} entries, freed {cache_stats['freed_memory_mb']} MB"
+            logger.info(f"🧹 {message}")
+            return message
+        else:
+            message = (
+                "No embedding cache available to clear (batch processing not enabled)"
+            )
+            logger.info(f"ℹ️ {message}")
+            return message
+
+
+@mcp.tool()
+@handle_mcp_tool_errors("get_cache_stats")
+async def get_cache_stats() -> Any:
+    """Get embedding cache statistics."""
+    embedding_manager = get_embedding_manager()
+
+    with OperationContext("get_cache_stats"):
+        cache_stats = embedding_manager.get_cache_stats()
+
+        if cache_stats is not None:
+            logger.info("📊 Retrieved cache statistics")
+            return {
+                "message": "Cache statistics retrieved successfully",
+                "cache_stats": cache_stats,
+            }
+        else:
+            return {
+                "message": "No cache available (batch processing not enabled)",
+                "cache_stats": None,
+            }
+
+
+@mcp.tool()
+@handle_mcp_tool_errors("batch_process_documents")
+async def batch_process_documents(
+    texts: List[str], normalize: bool = True, show_progress: bool = True
+) -> Any:
+    """Process multiple documents with optimized batch processing."""
+    if not texts:
+        raise ValueError("Documents list cannot be empty")
+
+    embedding_manager = get_embedding_manager()
+
+    with OperationContext("batch_process_documents", doc_count=len(texts)):
+
+        if embedding_manager.batch_processor is None:
+            raise ValueError(
+                "Batch processing not available - no embedding model loaded"
+            )
+
+        logger.info(f"🚀 Starting batch processing for {len(texts)} documents")
+        # Use the optimized batch processor directly
+        embeddings = await embedding_manager.batch_processor.encode_documents_optimized(
+            texts, normalize, show_progress
         )
-        return model_info
-    else:
+
+        if embeddings is None:
+            raise RuntimeError("Batch processing failed")
+
+        result_message = (
+            f"Successfully processed {len(texts)} documents with batch optimization"
+        )
+        logger.info(f"✅ {result_message}")
+
         return {
-            "message": "Model size information not available",
-            "recommendation": "Use smaller models for faster loading",
+            "message": result_message,
+            "document_count": len(texts),
+            "embedding_dimensions": len(embeddings[0]) if embeddings else 0,
+            "processing_optimized": True,
         }
-
-
-##### Utility Functions (for compatibility) #####
-
-
-class MCPTools:
-    """
-    Legacy compatibility class for existing server.py integration.
-    All actual functionality moved to @mcp.tool() functions above.
-    """
-
-    def __init__(self):
-        """Initialize compatibility layer."""
-        pass
-
-    def get_tools_list(self) -> List[Dict[str, Any]]:
-        """Get list of available tools for legacy compatibility."""
-        # This is now handled by FastMCP automatically
-        # Return empty list to maintain compatibility
-        return []
-
-    def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
-        """Legacy tool calling interface - deprecated."""
-        logger.warning(
-            f"Legacy call_tool used for {tool_name} - consider upgrading to FastMCP"
-        )
-        # Legacy fallback - this should not be used in production
-        raise NotImplementedError("Use FastMCP @mcp.tool() functions instead")
-
-
-# Export the FastMCP instance for server.py
-__all__ = ["mcp", "MCPTools"]
