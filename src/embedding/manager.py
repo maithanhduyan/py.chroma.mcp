@@ -5,9 +5,34 @@ Handles loading and managing different embedding models.
 """
 
 import logging
+import os
+import sys
 from typing import Dict, List, Optional, Any
 import numpy as np
-from .auth import HuggingFaceAuth
+
+# Handle imports with proper path setup
+current_dir = os.path.dirname(__file__)
+src_dir = os.path.dirname(current_dir)
+if src_dir not in sys.path:
+    sys.path.insert(0, src_dir)
+
+# Import metrics - try relative first, then absolute
+try:
+    from ..utils.metrics import (
+        track_execution_time,
+        measure_memory_usage,
+        MetricsCollector,
+    )
+except ImportError:
+    try:
+        from utils.metrics import (
+            track_execution_time,
+            measure_memory_usage,
+            MetricsCollector,
+        )
+    except ImportError:
+        # This should not happen if paths are set correctly, but just in case
+        raise ImportError("Could not import metrics module. Check your Python path.")
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +55,14 @@ class EmbeddingManager:
             "sentence-transformers/distiluse-base-multilingual-cased",  # Fast multilingual, smaller
             "sentence-transformers/paraphrase-multilingual-mpnet-base-v2",  # Good multilingual, larger
             "mixedbread-ai/mxbai-embed-large-v1",  # SOTA, requires HF token
-        ]
+        ]  # Initialize metrics collector
+        self.metrics = MetricsCollector()
+        # Simple operation counters for immediate metrics
+        self.operation_counts = {
+            "load_model": 0,
+            "encode_documents": 0,
+            "encode_query": 0,
+        }
 
     def load_model(self, model_name: str, force_reload: bool = False) -> bool:
         """
@@ -41,17 +73,23 @@ class EmbeddingManager:
             force_reload: Whether to reload if already cached
 
         Returns:
-            True if model loaded successfully
-        """
-        # Check if already loaded and cached
+            True if model loaded successfully"""
+        with track_execution_time("load_model"):
+            result = self._do_load_model(model_name, force_reload)
+            if result:
+                self.operation_counts["load_model"] += 1
+            return result
+
+    def _do_load_model(self, model_name: str, force_reload: bool = False) -> bool:
+        """Internal method for loading model without metrics tracking."""  # Check if already loaded and cached
         if not force_reload and model_name in self.models:
             self.current_model = self.models[model_name]
             self.current_model_name = model_name
             logger.info(f"✅ Using cached model: {model_name}")
             return True
 
-        # Setup HF authentication first
-        token = HuggingFaceAuth.setup_token()
+        # Setup HF authentication using environment variable
+        token = os.getenv("HF_TOKEN")
         if not token and model_name.startswith("mixedbread-ai"):
             logger.warning(f"⚠️ No HF_TOKEN found, may not be able to load {model_name}")
 
@@ -92,9 +130,7 @@ class EmbeddingManager:
                 return True
             else:
                 logger.warning(f"❌ Failed to load: {model_name}")
-                continue
-
-        # If all models fail, use ChromaDB default
+                continue  # If all models fail, use ChromaDB default
         logger.warning("❌ All embedding models failed to load")
         logger.info("🔄 Falling back to ChromaDB default embedding...")
         self.current_model = None
@@ -112,8 +148,17 @@ class EmbeddingManager:
             normalize: Whether to normalize embeddings
 
         Returns:
-            List of embeddings or None if no model available
-        """
+            List of embeddings or None if no model available"""
+        with track_execution_time("encode_documents"):
+            result = self._do_encode_documents(texts, normalize)
+            if result is not None:
+                self.operation_counts["encode_documents"] += 1
+            return result
+
+    def _do_encode_documents(
+        self, texts: List[str], normalize: bool = True
+    ) -> Optional[List[List[float]]]:
+        """Internal method for encoding documents."""
         if not self.current_model:
             logger.warning("No embedding model available, returning None")
             return None
@@ -152,6 +197,16 @@ class EmbeddingManager:
         Returns:
             Query embedding or None if no model available
         """
+        with track_execution_time("encode_query"):
+            result = self._do_encode_query(query, normalize)
+            if result is not None:
+                self.operation_counts["encode_query"] += 1
+            return result
+
+    def _do_encode_query(
+        self, query: str, normalize: bool = True
+    ) -> Optional[List[float]]:
+        """Internal method for encoding query."""
         if not self.current_model:
             logger.warning("No embedding model available, returning None")
             return None
@@ -212,6 +267,23 @@ class EmbeddingManager:
             "type": "SentenceTransformer",
             "cached_models": list(self.models.keys()),
         }
+
+    def get_metrics(self) -> Dict[str, Any]:
+        """
+        Get performance metrics for embedding operations.
+
+        Returns:
+            Dictionary containing performance metrics
+        """
+        base_metrics = self.metrics.get_performance_summary()
+        # Add our operation counts
+        base_metrics.update(
+            {
+                "operation_counts": self.operation_counts,
+                "total_custom_operations": sum(self.operation_counts.values()),
+            }
+        )
+        return base_metrics
 
     def intelligent_chunk_text(
         self, text: str, chunk_size: int = 400, overlap: int = 50

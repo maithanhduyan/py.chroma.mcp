@@ -25,15 +25,39 @@ from chromadb.types import Metadata
 from mcp.server.fastmcp import FastMCP
 
 # Import embedding modules
+import sys
+import os
+
+# Ensure proper imports work by adding src to path if needed
+current_dir = os.path.dirname(__file__)
+src_dir = (
+    os.path.dirname(current_dir)
+    if os.path.basename(current_dir) == "src"
+    else current_dir
+)
+if src_dir not in sys.path:
+    sys.path.insert(0, src_dir)
+
+# Now do the imports - they should work whether run as module or standalone
 try:
     from .embedding import EmbeddingManager
+    from .embedding.chunker import chunk_text_intelligent as _chunk_text_intelligent
+    from .utils.metrics import (
+        track_execution_time,
+        measure_memory_usage,
+        MetricsCollector,
+    )
 except ImportError:
-    # Fallback for standalone running
-    import sys
-    import os
-
-    sys.path.append(os.path.dirname(__file__))
+    # If relative imports fail, try absolute imports
     from embedding import EmbeddingManager
+    from embedding.chunker import chunk_text_intelligent as _chunk_text_intelligent
+    from utils.metrics import (
+        track_execution_time,
+        measure_memory_usage,
+        MetricsCollector,
+    )
+
+HAS_METRICS = True
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +82,8 @@ def get_embedding_manager():
     global _embedding_manager
     if _embedding_manager is None:
         _embedding_manager = EmbeddingManager()
-        _embedding_manager.load_best_available_model()
+        # Load default small model asynchronously when needed
+        logger.debug("🧠 EmbeddingManager initialized")
     return _embedding_manager
 
 
@@ -151,9 +176,9 @@ async def add_documents(
         if embedding_manager.current_model is not None:
             try:
                 embeddings = embedding_manager.encode_documents(clean_documents)
-                logger.info(
-                    f"Using custom embeddings: {embedding_manager.get_model_info()['name']}"
-                )
+                model_info = embedding_manager.get_model_info()
+                model_name = model_info.get("name", "unknown")
+                logger.info(f"Using custom embeddings: {model_name}")
             except Exception as e:
                 logger.warning(
                     f"Custom embedding failed, falling back to ChromaDB default: {e}"
@@ -167,7 +192,8 @@ async def add_documents(
                 ids=ids[: len(clean_documents)],
                 metadatas=metadatas[: len(clean_documents)] if metadatas else None,  # type: ignore
             )
-            model_name = embedding_manager.get_model_info()["name"]
+            model_info = embedding_manager.get_model_info()
+            model_name = model_info.get("name", "unknown")
             return f"Added {len(clean_documents)} documents to '{collection_name}' using {model_name} embeddings"
         else:
             collection.add(
@@ -203,12 +229,18 @@ async def query_collection(
         query_embeddings = None
         if embedding_manager.current_model is not None and len(query_texts) > 0:
             try:
-                query_embedding = embedding_manager.encode_query(query_texts[0])
-                if query_embedding:
-                    query_embeddings = [query_embedding]  # type: ignore
-                    logger.info(
-                        f"Using custom query embeddings: {embedding_manager.get_model_info()['name']}"
-                    )
+                # Convert to list for encoding
+                embeddings_list = []
+                for query_text in query_texts:
+                    embedding = embedding_manager.encode_query(query_text)
+                    if embedding:
+                        embeddings_list.append(embedding)
+
+                if embeddings_list:
+                    query_embeddings = embeddings_list
+                    model_info = embedding_manager.get_model_info()
+                    model_name = model_info.get("name", "unknown")
+                    logger.info(f"Using custom query embeddings: {model_name}")
             except Exception as e:
                 logger.warning(
                     f"Custom query embedding failed, falling back to ChromaDB default: {e}"
@@ -244,10 +276,15 @@ async def get_embedding_model_info() -> Dict[str, Any]:
     """Get information about current embedding model."""
     embedding_manager = get_embedding_manager()
     try:
-        return embedding_manager.get_model_info()
+        model_info = embedding_manager.get_model_info()
+        if model_info:
+            # Return the dictionary as-is since get_model_info already returns a properly formatted dict
+            return model_info
+        else:
+            return {"error": "No model currently loaded"}
     except Exception as e:
         logger.error(f"Failed to get embedding model info: {e}")
-        raise Exception(f"Failed to get embedding model info: {str(e)}")
+        return {"error": f"Failed to get model info: {str(e)}"}
 
 
 @mcp.tool()
@@ -258,7 +295,12 @@ async def configure_embedding_model(model_name: str, force_reload: bool = False)
         success = embedding_manager.load_model(model_name, force_reload)
         if success:
             model_info = embedding_manager.get_model_info()
-            return f"Successfully configured embedding model: {model_info['name']} (dim: {model_info['embedding_dim']})"
+            if model_info:
+                model_name_info = model_info.get("name", model_name)
+                dimension = model_info.get("embedding_dim", "unknown")
+                return f"Successfully configured embedding model: {model_name_info} (dim: {dimension})"
+            else:
+                return f"Model loaded but info unavailable: {model_name}"
         else:
             return f"Failed to load model '{model_name}'. Using ChromaDB default."
     except Exception as e:
@@ -283,9 +325,9 @@ async def chunk_text_intelligent(
         except UnicodeEncodeError:
             text = text.encode("utf-8", errors="ignore").decode("utf-8")
 
-        chunks = embedding_manager.intelligent_chunk_text(text, chunk_size, overlap)
-
-        # Validate and clean output chunks
+        chunks = _chunk_text_intelligent(
+            text, chunk_size, overlap
+        )  # Validate and clean output chunks
         cleaned_chunks = []
         for chunk in chunks:
             if isinstance(chunk, str) and chunk.strip():
@@ -303,6 +345,16 @@ async def chunk_text_intelligent(
     except Exception as e:
         logger.error(f"Failed to chunk text: {e}")
         raise Exception(f"Failed to chunk text: {str(e)}")
+
+
+@mcp.tool()
+async def get_performance_metrics() -> Dict[str, Any]:
+    """Get performance metrics for embedding operations."""
+    manager = get_embedding_manager()
+    if hasattr(manager, "get_metrics"):
+        return manager.get_metrics()
+    else:
+        return {"message": "Metrics not available", "total_operations": 0}
 
 
 ##### Utility Functions (for compatibility) #####
