@@ -3,7 +3,14 @@
     "chroma": {
       "type": "stdio",
       "command": "uv",
-      "args": ["run", "src/server.py"],
+      "args": [
+        "run",
+        "src/server.py",
+        "--client-type",
+        "persistent",
+        "--data-dir",
+        "chroma_db"
+      ],
       "cwd": "${workspaceFolder}"
     }
   }
