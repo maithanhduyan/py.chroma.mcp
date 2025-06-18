@@ -106,7 +106,7 @@ def get_chroma_client(args=None):
 
         # Load environment variables from .env file if it exists
         load_dotenv(dotenv_path=args.dotenv_path)
-        print(args.dotenv_path)
+        logger.info(args.dotenv_path)
         if args.client_type == "http":
             if not args.host:
                 raise ValueError(
@@ -135,10 +135,10 @@ def get_chroma_client(args=None):
                         raise ValueError("Port must be an integer")
                 _chroma_client = chromadb.HttpClient(**http_client_kwargs)
             except ssl.SSLError as e:
-                print(f"SSL connection failed: {str(e)}")
+                logger.info(f"SSL connection failed: {str(e)}")
                 raise
             except Exception as e:
-                print(f"Error connecting to HTTP client: {str(e)}")
+                logger.info(f"Error connecting to HTTP client: {str(e)}")
                 raise
 
         elif args.client_type == "cloud":
@@ -164,10 +164,10 @@ def get_chroma_client(args=None):
                     headers={"x-chroma-token": args.api_key},
                 )
             except ssl.SSLError as e:
-                print(f"SSL connection failed: {str(e)}")
+                logger.info(f"SSL connection failed: {str(e)}")
                 raise
             except Exception as e:
-                print(f"Error connecting to cloud client: {str(e)}")
+                logger.info(f"Error connecting to cloud client: {str(e)}")
                 raise
 
         elif args.client_type == "persistent":
@@ -187,22 +187,54 @@ def get_chroma_client(args=None):
 ##### Collection Tools #####
 @mcp.tool()
 async def echo(message: str) -> str:
-    """Echo back the input message (useful for testing)."""
+    """Phản hồi lại thông điệp đầu vào (hữu ích để kiểm tra)."""
     return f"Echo: {message}"
+
+
+@mcp.tool()
+async def semantic_chunking(
+    text: str, chunk_size: int = 500, overlap: int = 50
+) -> List[str]:
+    """
+    Chia nhỏ văn bản thành các đoạn (chunk) dựa trên kích thước và chồng lặp.
+
+    Tham số:
+        text: Văn bản cần chia nhỏ.
+        chunk_size: Kích thước tối đa của mỗi chunk (số ký tự).
+        overlap: Số ký tự chồng lặp giữa các chunk (tùy chọn).
+
+    Trả về:
+        Danh sách các chunk (mỗi chunk là một đoạn văn bản nhỏ).
+    """
+    if not text:
+        raise ValueError("Văn bản đầu vào không được để trống.")
+    if chunk_size <= 0:
+        raise ValueError("Kích thước chunk phải lớn hơn 0.")
+    if overlap < 0:
+        raise ValueError("Chồng lặp không được âm.")
+
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = min(start + chunk_size, len(text))
+        chunk = text[start:end]
+        chunks.append(chunk)
+        start += chunk_size - overlap  # Dịch chuyển với chồng lặp
+    return chunks
 
 
 @mcp.tool()
 async def list_collections(
     limit: int | None = None, offset: int | None = None
 ) -> List[str]:
-    """List all collection names in the Chroma database with pagination support.
+    """Liệt kê tất cả các tên collection trong cơ sở dữ liệu Chroma với hỗ trợ phân trang.
 
-    Args:
-        limit: Optional maximum number of collections to return
-        offset: Optional number of collections to skip before returning results
+    Tham số:
+        limit: Số lượng tối đa các collection cần trả về (tùy chọn).
+        offset: Số lượng collection cần bỏ qua trước khi trả về kết quả (tùy chọn).
 
-    Returns:
-        List of collection names or ["__NO_COLLECTIONS_FOUND__"] if database is empty
+    Trả về:
+        Danh sách các tên collection hoặc ["__NO_COLLECTIONS_FOUND__"] nếu cơ sở dữ liệu trống.
     """
     client = get_chroma_client()
     try:
@@ -236,20 +268,20 @@ async def create_collection(
     sync_threshold: int | None = None,
     resize_factor: float | None = None,
 ) -> str:
-    """Create a new Chroma collection with configurable HNSW parameters.
+    """Tạo một collection mới trong Chroma với các tham số HNSW có thể cấu hình.
 
-    Args:
-        collection_name: Name of the collection to create
-        space: Distance function used in HNSW index. Options: 'l2', 'ip', 'cosine'
-        ef_construction: Size of the dynamic candidate list for constructing the HNSW graph
-        ef_search: Size of the dynamic candidate list for searching the HNSW graph
-        max_neighbors: Maximum number of neighbors to consider during HNSW graph construction
-        num_threads: Number of threads to use during HNSW construction
-        batch_size: Number of elements to batch together during index construction
-        sync_threshold: Number of elements to process before syncing index to disk
-        resize_factor: Factor to resize the index by when it's full
-        embedding_function_name: Name of the embedding function to use. Options: 'default', 'cohere', 'openai', 'jina', 'voyageai', 'ollama', 'roboflow'
-        metadata: Optional metadata dict to add to the collection
+    Tham số:
+        collection_name: Tên của collection cần tạo.
+        space: Hàm khoảng cách được sử dụng trong chỉ mục HNSW. Các tùy chọn: 'l2', 'ip', 'cosine'.
+        ef_construction: Kích thước danh sách ứng viên động để xây dựng đồ thị HNSW.
+        ef_search: Kích thước danh sách ứng viên động để tìm kiếm trong đồ thị HNSW.
+        max_neighbors: Số lượng hàng xóm tối đa được xem xét trong quá trình xây dựng đồ thị HNSW.
+        num_threads: Số lượng luồng được sử dụng trong quá trình xây dựng HNSW.
+        batch_size: Số lượng phần tử được xử lý cùng lúc trong quá trình xây dựng chỉ mục.
+        sync_threshold: Số lượng phần tử cần xử lý trước khi đồng bộ chỉ mục với đĩa.
+        resize_factor: Hệ số mở rộng chỉ mục khi nó đầy.
+        embedding_function_name: Tên của hàm nhúng được sử dụng. Các tùy chọn: 'default', 'cohere', 'openai', 'jina', 'voyageai', 'ollama', 'roboflow'.
+        metadata: Từ điển metadata tùy chọn để thêm vào collection.
     """
     client = get_chroma_client()
 
@@ -292,12 +324,12 @@ async def create_collection(
 
 
 @mcp.tool()
-async def chroma_peek_collection(collection_name: str, limit: int = 5) -> Dict:
-    """Peek at documents in a Chroma collection.
+async def peek_collection(collection_name: str, limit: int = 5) -> Dict:
+    """Xem trước các tài liệu trong một collection của Chroma.
 
-    Args:
-        collection_name: Name of the collection to peek into
-        limit: Number of documents to peek at
+    Tham số:
+        collection_name: Tên của collection cần xem trước.
+        limit: Số lượng tài liệu cần xem trước.
     """
     client = get_chroma_client()
     try:
@@ -312,11 +344,11 @@ async def chroma_peek_collection(collection_name: str, limit: int = 5) -> Dict:
 
 
 @mcp.tool()
-async def chroma_get_collection_info(collection_name: str) -> Dict:
-    """Get information about a Chroma collection.
+async def get_collection_info(collection_name: str) -> Dict:
+    """Lấy thông tin về một collection trong Chroma.
 
-    Args:
-        collection_name: Name of the collection to get info about
+    Tham số:
+        collection_name: Tên của collection cần lấy thông tin.
     """
     client = get_chroma_client()
     try:
@@ -340,11 +372,11 @@ async def chroma_get_collection_info(collection_name: str) -> Dict:
 
 
 @mcp.tool()
-async def chroma_get_collection_count(collection_name: str) -> int:
-    """Get the number of documents in a Chroma collection.
+async def get_collection_count(collection_name: str) -> int:
+    """Lấy số lượng tài liệu trong một collection của Chroma.
 
-    Args:
-        collection_name: Name of the collection to count
+    Tham số:
+        collection_name: Tên của collection cần đếm.
     """
     client = get_chroma_client()
     try:
@@ -357,7 +389,7 @@ async def chroma_get_collection_count(collection_name: str) -> int:
 
 
 @mcp.tool()
-async def chroma_modify_collection(
+async def modify_collection(
     collection_name: str,
     new_name: str | None = None,
     new_metadata: Dict | None = None,
@@ -367,17 +399,17 @@ async def chroma_modify_collection(
     sync_threshold: int | None = None,
     resize_factor: float | None = None,
 ) -> str:
-    """Modify a Chroma collection's name or metadata.
+    """Chỉnh sửa tên hoặc metadata của một collection trong Chroma.
 
-    Args:
-        collection_name: Name of the collection to modify
-        new_name: Optional new name for the collection
-        new_metadata: Optional new metadata for the collection
-        ef_search: Size of the dynamic candidate list for searching the HNSW graph
-        num_threads: Number of threads to use during HNSW construction
-        batch_size: Number of elements to batch together during index construction
-        sync_threshold: Number of elements to process before syncing index to disk
-        resize_factor: Factor to resize the index by when it's full
+    Tham số:
+        collection_name: Tên của collection cần chỉnh sửa.
+        new_name: Tên mới cho collection (tùy chọn).
+        new_metadata: Metadata mới cho collection (tùy chọn).
+        ef_search: Kích thước danh sách ứng viên động để tìm kiếm trong đồ thị HNSW.
+        num_threads: Số lượng luồng được sử dụng trong quá trình xây dựng HNSW.
+        batch_size: Số lượng phần tử được xử lý cùng lúc trong quá trình xây dựng chỉ mục.
+        sync_threshold: Số lượng phần tử cần xử lý trước khi đồng bộ chỉ mục với đĩa.
+        resize_factor: Hệ số mở rộng chỉ mục khi nó đầy.
     """
     client = get_chroma_client()
     try:
@@ -416,11 +448,11 @@ async def chroma_modify_collection(
 
 
 @mcp.tool()
-async def chroma_delete_collection(collection_name: str) -> str:
-    """Delete a Chroma collection.
+async def delete_collection(collection_name: str) -> str:
+    """Xóa một collection trong Chroma.
 
-    Args:
-        collection_name: Name of the collection to delete
+    Tham số:
+        collection_name: Tên của collection cần xóa.
     """
     client = get_chroma_client()
     try:
@@ -434,19 +466,19 @@ async def chroma_delete_collection(collection_name: str) -> str:
 
 ##### Document Tools #####
 @mcp.tool()
-async def chroma_add_documents(
+async def add_documents(
     collection_name: str,
     documents: List[str],
     ids: List[str],
     metadatas: List[Dict] | None = None,
 ) -> str:
-    """Add documents to a Chroma collection.
+    """Thêm tài liệu vào một collection của Chroma.
 
-    Args:
-        collection_name: Name of the collection to add documents to
-        documents: List of text documents to add
-        ids: List of IDs for the documents (required)
-        metadatas: Optional list of metadata dictionaries for each document
+    Tham số:
+        collection_name: Tên của collection cần thêm tài liệu.
+        documents: Danh sách các tài liệu văn bản cần thêm.
+        ids: Danh sách các ID cho các tài liệu (bắt buộc).
+        metadatas: Danh sách metadata tùy chọn cho mỗi tài liệu.
     """
     if not documents:
         raise ValueError("The 'documents' list cannot be empty.")
@@ -500,7 +532,7 @@ async def chroma_add_documents(
 
 
 @mcp.tool()
-async def chroma_query_documents(
+async def query_documents(
     collection_name: str,
     query_texts: List[str],
     n_results: int = 5,
@@ -508,20 +540,20 @@ async def chroma_query_documents(
     where_document: Dict | None = None,
     include: List[str] = ["documents", "metadatas", "distances"],
 ) -> Dict:
-    """Query documents from a Chroma collection with advanced filtering.
+    """Truy vấn tài liệu từ một collection của Chroma với các bộ lọc nâng cao.
 
-    Args:
-        collection_name: Name of the collection to query
-        query_texts: List of query texts to search for
-        n_results: Number of results to return per query
-        where: Optional metadata filters using Chroma's query operators
-               Examples:
-               - Simple equality: {"metadata_field": "value"}
-               - Comparison: {"metadata_field": {"$gt": 5}}
-               - Logical AND: {"$and": [{"field1": {"$eq": "value1"}}, {"field2": {"$gt": 5}}]}
-               - Logical OR: {"$or": [{"field1": {"$eq": "value1"}}, {"field1": {"$eq": "value2"}}]}
-        where_document: Optional document content filters
-        include: List of what to include in response. By default, this will include documents, metadatas, and distances.
+    Tham số:
+        collection_name: Tên của collection cần truy vấn.
+        query_texts: Danh sách các văn bản truy vấn để tìm kiếm.
+        n_results: Số lượng kết quả cần trả về cho mỗi truy vấn.
+        where: Bộ lọc metadata tùy chọn sử dụng các toán tử truy vấn của Chroma.
+               Ví dụ:
+               - So sánh đơn giản: {"metadata_field": "value"}
+               - So sánh: {"metadata_field": {"$gt": 5}}
+               - AND logic: {"$and": [{"field1": {"$eq": "value1"}}, {"field2": {"$gt": 5}}]}
+               - OR logic: {"$or": [{"field1": {"$eq": "value1"}}, {"field1": {"$eq": "value2"}}]}
+        where_document: Bộ lọc nội dung tài liệu tùy chọn.
+        include: Danh sách các thông tin cần bao gồm trong kết quả. Mặc định bao gồm tài liệu, metadata và khoảng cách.
     """
     if not query_texts:
         raise ValueError("The 'query_texts' list cannot be empty.")
@@ -544,7 +576,7 @@ async def chroma_query_documents(
 
 
 @mcp.tool()
-async def chroma_get_documents(
+async def get_documents(
     collection_name: str,
     ids: List[str] | None = None,
     where: Dict | None = None,
@@ -553,24 +585,24 @@ async def chroma_get_documents(
     limit: int | None = None,
     offset: int | None = None,
 ) -> Dict:
-    """Get documents from a Chroma collection with optional filtering.
+    """Lấy tài liệu từ một collection của Chroma với các bộ lọc tùy chọn.
 
-    Args:
-        collection_name: Name of the collection to get documents from
-        ids: Optional list of document IDs to retrieve
-        where: Optional metadata filters using Chroma's query operators
-               Examples:
-               - Simple equality: {"metadata_field": "value"}
-               - Comparison: {"metadata_field": {"$gt": 5}}
-               - Logical AND: {"$and": [{"field1": {"$eq": "value1"}}, {"field2": {"$gt": 5}}]}
-               - Logical OR: {"$or": [{"field1": {"$eq": "value1"}}, {"field1": {"$eq": "value2"}}]}
-        where_document: Optional document content filters
-        include: List of what to include in response. By default, this will include documents, and metadatas.
-        limit: Optional maximum number of documents to return
-        offset: Optional number of documents to skip before returning results
+    Tham số:
+        collection_name: Tên của collection cần lấy tài liệu.
+        ids: Danh sách các ID tài liệu cần lấy (tùy chọn).
+        where: Bộ lọc metadata tùy chọn sử dụng các toán tử truy vấn của Chroma.
+               Ví dụ:
+               - So sánh đơn giản: {"metadata_field": "value"}
+               - So sánh: {"metadata_field": {"$gt": 5}}
+               - AND logic: {"$and": [{"field1": {"$eq": "value1"}}, {"field2": {"$gt": 5}}]}
+               - OR logic: {"$or": [{"field1": {"$eq": "value1"}}, {"field1": {"$eq": "value2"}}]}
+        where_document: Bộ lọc nội dung tài liệu tùy chọn.
+        include: Danh sách các thông tin cần bao gồm trong kết quả. Mặc định bao gồm tài liệu và metadata.
+        limit: Số lượng tài liệu tối đa cần trả về (tùy chọn).
+        offset: Số lượng tài liệu cần bỏ qua trước khi trả về kết quả (tùy chọn).
 
-    Returns:
-        Dictionary containing the matching documents, their IDs, and requested includes
+    Trả về:
+        Từ điển chứa các tài liệu phù hợp, ID của chúng và các thông tin được yêu cầu.
     """
     client = get_chroma_client()
     try:
@@ -591,33 +623,28 @@ async def chroma_get_documents(
 
 
 @mcp.tool()
-async def chroma_update_documents(
+async def update_documents(
     collection_name: str,
     ids: List[str],
     embeddings: List[List[float]] | None = None,
     metadatas: List[Dict] | None = None,
     documents: List[str] | None = None,
 ) -> str:
-    """Update documents in a Chroma collection.
+    """Cập nhật tài liệu trong một collection của Chroma.
 
-    Args:
-        collection_name: Name of the collection to update documents in
-        ids: List of document IDs to update (required)
-        embeddings: Optional list of new embeddings for the documents.
-                    Must match length of ids if provided.
-        metadatas: Optional list of new metadata dictionaries for the documents.
-                   Must match length of ids if provided.
-        documents: Optional list of new text documents.
-                   Must match length of ids if provided.
+    Tham số:
+        collection_name: Tên của collection cần cập nhật tài liệu.
+        ids: Danh sách các ID tài liệu cần cập nhật (bắt buộc).
+        embeddings: Danh sách nhúng mới cho các tài liệu (tùy chọn).
+        metadatas: Danh sách metadata mới cho các tài liệu (tùy chọn).
+        documents: Danh sách các tài liệu văn bản mới (tùy chọn).
 
-    Returns:
-        A confirmation message indicating the number of documents updated.
+    Trả về:
+        Thông báo xác nhận số lượng tài liệu đã được cập nhật.
 
-    Raises:
-        ValueError: If 'ids' is empty or if none of 'embeddings', 'metadatas',
-                    or 'documents' are provided, or if the length of provided
-                    update lists does not match the length of 'ids'.
-        Exception: If the collection does not exist or if the update operation fails.
+    Ngoại lệ:
+        ValueError: Nếu 'ids' trống hoặc không có 'embeddings', 'metadatas', hoặc 'documents' được cung cấp.
+        Exception: Nếu collection không tồn tại hoặc nếu thao tác cập nhật thất bại.
     """
     if not ids:
         raise ValueError("The 'ids' list cannot be empty.")
@@ -666,19 +693,12 @@ async def chroma_update_documents(
 
 
 @mcp.tool()
-async def chroma_delete_documents(collection_name: str, ids: List[str]) -> str:
-    """Delete documents from a Chroma collection.
+async def delete_documents(collection_name: str, ids: List[str]) -> str:
+    """Xóa tài liệu khỏi một collection của Chroma.
 
-    Args:
-        collection_name: Name of the collection to delete documents from
-        ids: List of document IDs to delete
-
-    Returns:
-        A confirmation message indicating the number of documents deleted.
-
-    Raises:
-        ValueError: If 'ids' is empty
-        Exception: If the collection does not exist or if the delete operation fails.
+    Tham số:
+        collection_name: Tên của collection cần xóa tài liệu.
+        ids: Danh sách các ID tài liệu cần xóa.
     """
     if not ids:
         raise ValueError("The 'ids' list cannot be empty.")

@@ -11,6 +11,13 @@ dependencies = [
     "mcp>=1.0.0"
 ]
 
+[project.scripts]
+chroma-mcp = "src.server:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
 [tool.black]
 #line-length = 88
 target-version = ["py310", "py311", "py312"]
