@@ -1,7 +1,7 @@
 [project]
 name = "py-chroma-mcp"
-version = "0.1.0"
-description = "A simple Model Context Protocol (MCP) server using stdio."
+version = "2.0.0"
+description = "A Model Context Protocol (MCP) server with Vietnamese text support and ChromaDB integration."
 authors = [
     { name = "Mai Thành Duy An", email = "tiachop0102@gmail.com" }
 ]

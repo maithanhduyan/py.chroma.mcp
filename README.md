@@ -6,11 +6,14 @@ A modern Model Context Protocol (MCP) server with ChromaDB integration. This ser
 
 - 🚀 **Vector Database**: Full ChromaDB integration with collection management
 - 🧠 **Smart Embeddings**: Configurable embedding models with caching
+- 🇻🇳 **Vietnamese Language Support**: Native Vietnamese text processing with NomicVietnameseEmbeddingFunction
+- 📚 **Story Content Processing**: Advanced chunking and semantic search for Vietnamese literature
+- 🔍 **Semantic Search**: Intelligent Vietnamese query understanding and retrieval
 - ⚡ **Fast Package Management**: UV-first approach for lightning-fast installations
 - 🔧 **Environment-First**: Configuration via environment variables
 - 📊 **Performance Monitoring**: Built-in metrics and cache optimization
 - 🔄 **Batch Processing**: Efficient document processing with progress tracking
-- 🌐 **Vietnamese Optimized**: Intelligent text chunking for Vietnamese content
+- 🌐 **Multilingual Optimized**: Intelligent text chunking for Vietnamese and international content
 
 ## 🚀 Quick Start
 
