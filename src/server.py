@@ -224,6 +224,26 @@ async def semantic_chunking(
 
 
 @mcp.tool()
+async def semantic_chunking_by_embedding(
+    text: str, similarity_threshold: float = 0.85
+) -> List[str]:
+    """
+    Chia nhỏ văn bản thành các đoạn dựa trên ngưỡng tương đồng nhúng.
+
+    Tham số:
+        text: Văn bản cần chia nhỏ.
+        similarity_threshold: Ngưỡng tương đồng để xác định khi nào tạo chunk mới.
+
+    Trả về:
+        Danh sách các chunk (mỗi chunk là một đoạn văn bản nhỏ).
+    """
+
+    chunks = []
+
+    return chunks
+
+
+@mcp.tool()
 async def list_collections(
     limit: int | None = None, offset: int | None = None
 ) -> List[str]:
