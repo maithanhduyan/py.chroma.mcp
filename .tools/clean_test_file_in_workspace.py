@@ -25,6 +25,9 @@ def main():
     error_count = 0
 
     for foldername, subfolders, filenames in os.walk(workspace_dir):
+        # Bỏ qua thư mục .venv
+        if ".venv" in foldername.split(os.sep):
+            continue
         for filename in filenames:
             if filename.startswith("test_") and filename.endswith(".py"):
                 file_path = os.path.join(foldername, filename)
