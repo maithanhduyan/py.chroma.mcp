@@ -16,9 +16,10 @@ GPU/CPU DEVICE HANDLING:
 - Device information shown in model info for transparency
 
 MODEL SELECTION OPTIMIZATION:
-- Model priority list ordered by size/speed (fastest first)
-- Size information provided to help users choose appropriate models
-- Progress indication for long downloads
+- Single unified model: nomic-ai/nomic-embed-text-v2-moe (Latest MoE, SoTA multilingual)
+- No complex fallback chain - simplified configuration
+- ChromaDB default embedding as ultimate fallback
+- Progress indication for model downloads
 - Local caching to speed up subsequent loads
 """
 
@@ -63,9 +64,10 @@ PROJECT_ROOT = setup_project_paths()
 
 
 # Default configuration constants
-DEFAULT_EMBEDDING_MODEL = (
-    "nomic-ai/nomic-embed-text-v1.5"  # Lightweight, no token required
-)
+DEFAULT_EMBEDDING_MODEL = "nomic-ai/nomic-embed-text-v2-moe"  # Latest MoE version, SoTA multilingual (305M active/475M total), 768D embeddings
+FALLBACK_EMBEDDING_MODELS = [
+    "nomic-ai/nomic-embed-text-v2-moe",  # Primary model - Latest MoE version, SoTA multilingual
+]
 DEFAULT_CHUNK_SIZE = 400
 DEFAULT_CHUNK_OVERLAP = 50
 DEFAULT_CHROMA_DB_PATH = "./chroma_db"
@@ -77,13 +79,15 @@ def get_embedding_config() -> Dict[str, Any]:
 
     Returns:
         Dictionary containing embedding configuration:
-        - default_model: Default embedding model to use
+        - default_model: Default embedding model to use (nomic-ai/nomic-embed-text-v2-moe)
+        - fallback_models: Single model in list format for consistency
         - chunk_size: Size of text chunks for embedding
         - chunk_overlap: Overlap between chunks
         - enable_custom_embeddings: Whether to allow custom embedding models
     """
     return {
         "default_model": os.getenv("DEFAULT_EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL),
+        "fallback_models": FALLBACK_EMBEDDING_MODELS,
         "chunk_size": int(os.getenv("EMBEDDING_CHUNK_SIZE", str(DEFAULT_CHUNK_SIZE))),
         "chunk_overlap": int(
             os.getenv("EMBEDDING_CHUNK_OVERLAP", str(DEFAULT_CHUNK_OVERLAP))

@@ -4,24 +4,25 @@ Embedding manager for MCP server.
 Handles loading and managing different embedding models.
 """
 
-import logging
 import os
 from typing import Dict, List, Optional, Any
 import numpy as np
 
 # Import config to setup project paths automatically
 import config
+from config import get_embedding_config
 
 from utils.metrics import (
     track_execution_time,
     measure_memory_usage,
     MetricsCollector,
 )
+from utils.logger import get_logger
 
 # Import batch processor for optimization (will be imported when needed)
 # from .batch_processor import BatchProcessor
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class EmbeddingManager:
@@ -36,12 +37,10 @@ class EmbeddingManager:
         self.current_model = None
         self.current_model_name = "chromadb-default"
 
-        # Model priority list (fastest to slowest, no HF token required, multilingual preferred)
-        self.model_priority = [
-            "nomic-ai/nomic-embed-text-v1.5",  # Very lightweight (137MB), no token needed, good performance
-            "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",  # Small (177MB), multilingual
-            "sentence-transformers/paraphrase-multilingual-mpnet-base-v2",  # High quality (1.1GB), multilingual
-        ]
+        # Get configuration from config.py
+        embedding_config = get_embedding_config()
+        self.default_model = embedding_config["default_model"]
+        self.model_priority = embedding_config["fallback_models"]
 
         # Initialize metrics collector
         self.metrics = MetricsCollector()
@@ -104,9 +103,9 @@ class EmbeddingManager:
         if not force_reload and model_name in self.models:
             self.current_model = self.models[model_name]
             self.current_model_name = model_name
-            logger.info(f"✅ Using cached model: {model_name}")
-
-            # Initialize batch processor with current model
+            logger.info(
+                f"✅ Using cached model: {model_name}"
+            )  # Initialize batch processor with current model
             self._initialize_batch_processor()
             return True
 
@@ -114,36 +113,110 @@ class EmbeddingManager:
             logger.info(f"🔄 Loading embedding model: {model_name}")
             logger.info("⏳ This may take a few minutes for first-time downloads...")
 
-            from sentence_transformers import SentenceTransformer
+            # Try sentence-transformers first
+            try:
+                from sentence_transformers import SentenceTransformer
 
-            # Detect optimal device (GPU/CPU)
-            device = self._detect_optimal_device()
+                # Detect optimal device (GPU/CPU)
+                device = self._detect_optimal_device()
 
-            # Load the model with appropriate device and progress indication
-            logger.info(f"📱 Loading model on device: {device}")
-            logger.info(
-                "📥 Downloading model files (if not cached)..."
-            )  # Set cache directory for faster subsequent loads
-            cache_dir = os.getenv("SENTENCE_TRANSFORMERS_HOME", "./models_cache")
+                # Load the model with appropriate device and progress indication
+                logger.info(f"📱 Loading model on device: {device}")
+                logger.info("📥 Downloading model files (if not cached)...")
 
-            model = SentenceTransformer(
-                model_name,
-                device=device,
-                cache_folder=cache_dir,
-                trust_remote_code=True,
-            )
+                # Set cache directory for faster subsequent loads
+                cache_dir = os.getenv("SENTENCE_TRANSFORMERS_HOME", "./models_cache")
 
-            # Cache the model
-            self.models[model_name] = model
-            self.current_model = model
-            self.current_model_name = model_name
+                model = SentenceTransformer(
+                    model_name,
+                    device=device,
+                    cache_folder=cache_dir,
+                    trust_remote_code=True,
+                )
 
-            # Initialize batch processor with new model
-            self._initialize_batch_processor()
+                # Cache the model
+                self.models[model_name] = model
+                self.current_model = model
+                self.current_model_name = model_name
 
-            logger.info(f"✅ Successfully loaded model: {model_name} on {device}")
-            logger.info(f"💾 Model cached to: {cache_dir}")
-            return True
+                # Initialize batch processor with new model
+                self._initialize_batch_processor()
+
+                logger.info(f"✅ Successfully loaded model: {model_name} on {device}")
+                logger.info(f"💾 Model cached to: {cache_dir}")
+                return True
+
+            except Exception as sentence_transformers_error:
+                logger.warning(
+                    f"⚠️ SentenceTransformers failed: {sentence_transformers_error}"
+                )
+                logger.info("🔄 Trying fallback with transformers AutoModel...")
+
+                # Fallback to transformers AutoModel
+                from transformers import AutoModel, AutoTokenizer
+                import torch
+
+                device = self._detect_optimal_device()
+                logger.info(f"📱 Loading fallback model on device: {device}")
+
+                # Load tokenizer and model
+                tokenizer = AutoTokenizer.from_pretrained(
+                    model_name, trust_remote_code=True
+                )
+                model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
+                model.to(device)
+                model.eval()
+
+                # Create a wrapper to make it compatible with our interface
+                class TransformersModelWrapper:
+                    def __init__(self, model, tokenizer, device):
+                        self.model = model
+                        self.tokenizer = tokenizer
+                        self.device = device
+
+                    def encode(self, texts, **kwargs):
+                        """Encode texts to embeddings using transformers model."""
+                        if isinstance(texts, str):
+                            texts = [texts]
+
+                        # Tokenize
+                        inputs = self.tokenizer(
+                            texts,
+                            padding=True,
+                            truncation=True,
+                            return_tensors="pt",
+                            max_length=512,
+                        )
+                        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+                        # Get embeddings
+                        with torch.no_grad():
+                            outputs = self.model(**inputs)
+                            # Use [CLS] token embedding or mean pooling
+                            embeddings = outputs.last_hidden_state.mean(dim=1)
+
+                        # Normalize if requested
+                        if kwargs.get("normalize_embeddings", True):
+                            embeddings = torch.nn.functional.normalize(
+                                embeddings, p=2, dim=1
+                            )
+
+                        return embeddings.cpu().numpy()
+
+                wrapped_model = TransformersModelWrapper(model, tokenizer, device)
+
+                # Cache the model
+                self.models[model_name] = wrapped_model
+                self.current_model = wrapped_model
+                self.current_model_name = model_name
+
+                # Note: batch processor may not work with fallback model
+                self.batch_processor = None
+
+                logger.info(
+                    f"✅ Successfully loaded fallback model: {model_name} on {device}"
+                )
+                return True
 
         except Exception as e:
             logger.error(f"❌ Failed to load model {model_name}: {e}")
@@ -160,24 +233,49 @@ class EmbeddingManager:
                 "🚀 Batch processor initialized for optimized embedding processing"
             )
 
+    def load_default_model(self) -> bool:
+        """
+        Load the default embedding model from configuration.
+
+        Returns:
+            True if default model loaded successfully
+        """
+        logger.info(f"🔄 Loading default model: {self.default_model}")
+        return self.load_model(self.default_model)
+
     def load_best_available_model(self) -> bool:
         """
         Load the best available embedding model from priority list.
+        First tries the default model, then fallback models.
 
         Returns:
             True if any model was loaded successfully
         """
         logger.info("🔄 Loading best available embedding model...")
 
+        # First try the default model
+        logger.info(f"🔄 Trying default model: {self.default_model}")
+        if self.load_model(self.default_model):
+            logger.info(f"✅ Successfully loaded default model: {self.default_model}")
+            return True
+        else:
+            logger.warning(f"❌ Failed to load default model: {self.default_model}")
+
+        # Then try fallback models
         for model_name in self.model_priority:
-            logger.info(f"🔄 Trying to load: {model_name}")
+            if model_name == self.default_model:
+                continue  # Skip already tried default model
+
+            logger.info(f"🔄 Trying fallback model: {model_name}")
 
             if self.load_model(model_name):
-                logger.info(f"✅ Successfully loaded: {model_name}")
+                logger.info(f"✅ Successfully loaded fallback model: {model_name}")
                 return True
             else:
                 logger.warning(f"❌ Failed to load: {model_name}")
-                continue  # If all models fail, use ChromaDB default
+                continue
+
+        # If all models fail, use ChromaDB default
         logger.warning("❌ All embedding models failed to load")
         logger.info("🔄 Falling back to ChromaDB default embedding...")
         self.current_model = None
@@ -352,14 +450,10 @@ class EmbeddingManager:
             )
             embedding_dim = (
                 len(test_embedding[0]) if len(test_embedding) > 0 else "Unknown"
-            )
-
-            # Get device information
+            )  # Get device information
             device = "Unknown"
             try:
-                if hasattr(self.current_model, "_target_device"):
-                    device = str(self.current_model._target_device)
-                elif hasattr(self.current_model, "device"):
+                if hasattr(self.current_model, "device"):
                     device = str(self.current_model.device)
                 else:
                     device = self._detect_optimal_device()
@@ -501,15 +595,15 @@ class EmbeddingManager:
         Returns:
             Dictionary with model names and their approximate sizes
         """
-
         size_info = {
-            "nomic-ai/nomic-embed-text-v1.5": "137MB - Lightweight, good performance, no token needed",
-            "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2": "177MB - Fast, multilingual",
-            "sentence-transformers/paraphrase-multilingual-mpnet-base-v2": "1.1GB - High quality, multilingual",
+            "nomic-ai/nomic-embed-text-v2-moe": "305M active/475M total - Latest MoE version, SoTA multilingual, 768D embeddings, no token needed",
+            # "nomic-ai/nomic-embed-text-v1.5": "137MB - Previous version, stable fallback, 768D embeddings",
+            # "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2": "177MB - Fast, multilingual",
+            # "sentence-transformers/paraphrase-multilingual-mpnet-base-v2": "1.1GB - High quality, multilingual",
         }
 
         return {
             "available_models": size_info,
-            "recommendation": "For fast testing: nomic-ai/nomic-embed-text-v1.5",
+            "recommendation": "For best multilingual performance: nomic-ai/nomic-embed-text-v2-moe",
             "note": "All models are publicly accessible, no HF token required",
         }

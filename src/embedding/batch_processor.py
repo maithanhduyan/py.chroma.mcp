@@ -6,13 +6,14 @@ Handles adaptive batching, caching, and memory management.
 
 import asyncio
 import hashlib
-import logging
 import os
 from typing import Dict, List, Optional, Any, Tuple, Generator, Union
 from functools import lru_cache
 import json
 from concurrent.futures import ThreadPoolExecutor
 import time
+
+from utils.logger import get_logger
 
 # Try to import psutil, fall back to basic memory estimation
 try:
@@ -22,7 +23,7 @@ try:
 except ImportError:
     HAS_PSUTIL = False
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class EmbeddingCache:

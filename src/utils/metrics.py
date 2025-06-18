@@ -6,17 +6,18 @@ Provides basic performance and quality metrics.
 """
 
 import time
-import logging
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field
 
-logger = logging.getLogger(__name__)
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 @dataclass
 class PerformanceMetrics:
     """Container for performance measurement data."""
-    
+
     operation_name: str
     execution_time: float
     memory_usage_mb: float = 0.0
@@ -47,7 +48,7 @@ class PerformanceMetrics:
 @dataclass
 class QualityMetrics:
     """Container for data quality metrics."""
-    
+
     operation_name: str
     accuracy: float
     precision: float
@@ -59,23 +60,23 @@ class QualityMetrics:
 
 class MetricsCollector:
     """Simple metrics collection system."""
-    
+
     def __init__(self):
         self.performance_metrics: List[PerformanceMetrics] = []
         self.quality_metrics: List[QualityMetrics] = []
-    
+
     def add_performance_metric(self, metric: PerformanceMetrics) -> None:
         """Add performance metric."""
         self.performance_metrics.append(metric)
         logger.debug(f"📊 Added performance metric: {metric.operation_name}")
-    
+
     def get_performance_summary(self) -> Dict[str, Any]:
         """Get performance summary."""
         if not self.performance_metrics:
             return {"total_operations": 0}
-        
+
         execution_times = [m.execution_time for m in self.performance_metrics]
-        
+
         return {
             "total_operations": len(self.performance_metrics),
             "avg_execution_time": sum(execution_times) / len(execution_times),
@@ -101,21 +102,27 @@ def benchmark_function(func):
 
 def measure_memory_usage(operation_name: str):
     """Simple memory usage context manager."""
+
     class SimpleContext:
         def __enter__(self):
             return {"memory_delta_mb": 0.0, "peak_memory_mb": 0.0}
+
         def __exit__(self, *args):
             pass
+
     return SimpleContext()
 
 
 def track_execution_time(operation_name: str):
     """Simple execution time context manager."""
+
     class SimpleContext:
         def __enter__(self):
             self.start_time = time.time()
             return self
+
         def __exit__(self, *args):
             execution_time = time.time() - self.start_time
             logger.info(f"⏱️ {operation_name} took {execution_time:.2f}s")
+
     return SimpleContext()

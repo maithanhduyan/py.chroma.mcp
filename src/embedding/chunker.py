@@ -14,16 +14,17 @@ Features:
 """
 
 import re
-import logging
 from typing import List, Dict, Any, Optional, Tuple, Union
 from dataclasses import dataclass
 from enum import Enum
 import unicodedata
 
+from utils.logger import get_logger
+
 # Vietnamese text processing - enhanced regex approach
 HAS_UNDERTHESEA = False  # Fallback to enhanced regex due to build issues
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Vietnamese-specific text patterns
 VIETNAMESE_SENTENCE_PATTERNS = [

@@ -11,11 +11,12 @@ This module provides validation for ChromaDB operations including:
 
 import re
 import json
-import logging
 from typing import Dict, List, Optional, Any, Union
 from dataclasses import dataclass
 
-logger = logging.getLogger(__name__)
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 # Constants
 MAX_COLLECTION_NAME_LENGTH = 63

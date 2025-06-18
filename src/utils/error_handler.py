@@ -5,7 +5,6 @@ Enhanced error handling and logging utilities for ChromaDB MCP server.
 Provides comprehensive error tracking, logging, and recovery mechanisms.
 """
 
-import logging
 import traceback
 import time
 from typing import Dict, Any, Optional, Callable, TypeVar
@@ -13,7 +12,9 @@ from functools import wraps
 from dataclasses import dataclass, field
 import asyncio
 
-logger = logging.getLogger(__name__)
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 F = TypeVar("F", bound=Callable[..., Any])
 

@@ -1,10 +1,11 @@
 {
   "servers": {
-    "chroma": {
-      "type": "stdio",
-      "command": "uv",
-      "args": ["run", "src/server.py"],
-      "cwd": "${workspaceFolder}"
-    }
+    // Temporarily disabled for debugging with launch.json
+    // "chroma": {
+    //   "type": "stdio",
+    //   "command": "uv",
+    //   "args": ["run", "src/server.py"],
+    //   "cwd": "${workspaceFolder}"
+    // }
   }
 }

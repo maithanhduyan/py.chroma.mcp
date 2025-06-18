@@ -42,7 +42,7 @@ applyTo: "**"
 1. **BƯỚC 1**: Kiểm tra #get_errors panel trong VSCode
 2. **BƯỚC 2**: Fix tất cả errors và warnings trước khi run
 3. **BƯỚC 3**: Validate syntax và imports
-4. **BƯỚC 4**: Mới được phép chạy code trong terminal
+4. **BƯỚC 4**: Không còn lỗi nữa mới được phép chạy code trong terminal
 5. **BƯỚC 5**: Monitor runtime errors và handle gracefully
 
 ## Dependency Management
@@ -92,7 +92,39 @@ Luôn sử dụng thư mục `tests` để viết test.
   assert result.is_valid == True
   assert len(result.errors) == 0
   ```
-- Delete all "test\_\*.py" file after testing.
+
+### Test File Cleanup Workflow
+
+**QUAN TRỌNG**: Sau khi testing xong, luôn dọn dẹp test files để giữ workspace sạch sẽ.
+
+#### Cách 1: Sử dụng VS Code Task (Khuyến nghị)
+```bash
+# Chạy task có sẵn để xóa tất cả test files
+Ctrl+Shift+P → "Tasks: Run Task" → "Clean Test Files"
+```
+
+#### Cách 2: Sử dụng Terminal
+```powershell
+# Xóa tất cả test files trong workspace
+python .tools\clean_test_file_in_workspace.py
+```
+
+#### Cách 3: Xóa thủ công
+```powershell
+# Xóa file test cụ thể
+Remove-Item "test_*.py" -Force
+```
+
+**Lưu ý**: Task "Clean Test Files" sẽ tự động:
+- Quét toàn bộ workspace để tìm file `test_*.py`
+- Xóa tất cả test files tạm thời
+- Báo cáo số lượng file đã xóa
+- Bảo toàn các file test production quan trọng
+
+**Best Practice**: 
+- Luôn chạy task cleanup sau mỗi session testing
+- Không commit test files tạm thời vào git
+- Chỉ giữ lại test files chính thức trong thư mục `tests/`
 
 ## Error Recovery Strategies
 
@@ -164,6 +196,56 @@ Luôn sử dụng thư mục `tests` để viết test.
   ├── server.py       # Main MCP server
   └── tools.py        # MCP tool implementations
   ```
+
+### Code Refactoring Workflow
+
+Khi cần refactor hoặc thu gọn code lớn:
+
+#### 1. **Safety Backup Strategy**
+```powershell
+# Tạo backup file trước khi refactor
+copy original_file.py original_file_backup.py
+
+# Tạo version mới để test
+# ... refactor code ...
+# Lưu thành original_file_cleaned.py
+```
+
+#### 2. **Testing & Validation**
+```powershell
+# Test version mới thoroughly
+python test_new_version.py
+
+# So sánh functionality cũ vs mới
+# Đảm bảo không có regression
+```
+
+#### 3. **Deployment & Cleanup**
+```powershell
+# Khi confirm version mới OK:
+copy original_file_cleaned.py original_file.py
+
+# Dọn dẹp files tạm thời
+del original_file_backup.py
+del original_file_cleaned.py
+del test_*.py
+```
+
+#### 4. **Best Practices**
+- **Luôn backup trước khi refactor lớn**
+- **Test thoroughly trước khi replace**
+- **So sánh line count và file size**
+- **Validate tất cả functionality**
+- **Dọn dẹp files tạm sau khi xong**
+- **Commit changes với clear message**
+
+**Example từ thực tế**:
+```
+tools.py (567 lines) → tools_backup.py (backup)
+                   → tools_cleaned.py (456 lines, optimized)
+                   → tools.py (updated, tested)
+                   → cleanup: del backup & cleaned files
+```
 
 ## Quality Assurance Checklist
 
@@ -269,3 +351,6 @@ gitGraph
     commit id: "Release Merged Back"
 
 ```
+
+## Terminal sử dụng powershell trong windows
+
