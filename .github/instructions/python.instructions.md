@@ -352,5 +352,6 @@ gitGraph
 
 ```
 
-## Terminal sử dụng powershell trong windows
+## Dependencies Management
+**Only using `uv` for Python package and project manager.**
 

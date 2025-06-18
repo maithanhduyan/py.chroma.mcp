@@ -1549,7 +1549,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "chromadb", specifier = ">=1.0.12" },
-    { name = "einops" },
+    { name = "einops", specifier = "==0.8.1" },
     { name = "mcp", specifier = ">=1.0.0" },
     { name = "numpy", specifier = ">=1.24.0" },
     { name = "psutil" },

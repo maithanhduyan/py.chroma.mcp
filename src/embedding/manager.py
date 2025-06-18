@@ -35,12 +35,29 @@ class EmbeddingManager:
         """Initialize the embedding manager."""
         self.models: Dict[str, Any] = {}  # Cache loaded models
         self.current_model = None
-        self.current_model_name = "chromadb-default"
+        self.current_model_name = (
+            "chromadb-default"  # PRIORITY 1: Environment Variables (cao nhất)
+        )
+        env_model = self._get_model_from_env()
 
-        # Get configuration from config.py
-        embedding_config = get_embedding_config()
-        self.default_model = embedding_config["default_model"]
-        self.model_priority = embedding_config["fallback_models"]
+        if env_model:
+            self.default_model = env_model
+            # Use env-based fallback priority
+            self.model_priority = self._get_fallback_models_from_env()
+        else:
+            # PRIORITY 2: Fallback to config.py if env not set
+            try:
+                embedding_config = get_embedding_config()
+                self.default_model = embedding_config["default_model"]
+                self.model_priority = embedding_config["fallback_models"]
+            except Exception as e:
+                logger.warning(f"⚠️ Config load failed: {e}, using hardcoded defaults")
+                # PRIORITY 3: Hardcoded defaults as final fallback
+                self.default_model = "sentence-transformers/all-MiniLM-L6-v2"
+                self.model_priority = [
+                    "sentence-transformers/all-MiniLM-L6-v2",
+                    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+                ]
 
         # Initialize metrics collector
         self.metrics = MetricsCollector()
@@ -115,17 +132,18 @@ class EmbeddingManager:
 
             # Try sentence-transformers first
             try:
-                from sentence_transformers import SentenceTransformer
+                from sentence_transformers import (
+                    SentenceTransformer,
+                )  # PRIORITY 1: Get device from environment variables
 
-                # Detect optimal device (GPU/CPU)
-                device = self._detect_optimal_device()
+                device = self._get_device_from_env()
 
                 # Load the model with appropriate device and progress indication
                 logger.info(f"📱 Loading model on device: {device}")
-                logger.info("📥 Downloading model files (if not cached)...")
-
-                # Set cache directory for faster subsequent loads
-                cache_dir = os.getenv("SENTENCE_TRANSFORMERS_HOME", "./models_cache")
+                logger.info(
+                    "📥 Downloading model files (if not cached)..."
+                )  # PRIORITY 1: Get cache directory from environment variables
+                cache_dir = self._get_cache_dir_from_env()
 
                 model = SentenceTransformer(
                     model_name,
@@ -154,9 +172,9 @@ class EmbeddingManager:
 
                 # Fallback to transformers AutoModel
                 from transformers import AutoModel, AutoTokenizer
-                import torch
+                import torch  # PRIORITY 1: Get device from environment variables
 
-                device = self._detect_optimal_device()
+                device = self._get_device_from_env()
                 logger.info(f"📱 Loading fallback model on device: {device}")
 
                 # Load tokenizer and model
@@ -388,9 +406,9 @@ class EmbeddingManager:
                     return cached_embedding
 
             # Encode the query
-            result = self._do_encode_query(query, normalize)
-
-            # Cache the result if batch processor is available
+            result = self._do_encode_query(
+                query, normalize
+            )  # Cache the result if batch processor is available
             if result is not None and use_cache and self.batch_processor is not None:
                 self.batch_processor.cache.set(query, result)
 
@@ -412,7 +430,9 @@ class EmbeddingManager:
             )
             embedding = self.current_model.encode(
                 [query], normalize_embeddings=normalize
-            )  # Convert to list for ChromaDB compatibility
+            )
+
+            # Convert to list for ChromaDB compatibility
             if isinstance(embedding, np.ndarray):
                 embedding_list = embedding[0].tolist()
             else:
@@ -432,16 +452,36 @@ class EmbeddingManager:
         Get information about the current model.
 
         Returns:
-            Model information dictionary
+            Model information dictionary including environment variables
         """
+        # Get environment variable configuration
+        env_model = self._get_model_from_env()
+        env_device = os.getenv("EMBEDDING_DEVICE", "not set")
+        env_cache_dir = os.getenv("EMBEDDING_CACHE_DIR", "not set")
+
+        base_info = {
+            "name": self.current_model_name,
+            "configured_model": self.default_model,
+            "environment_variables": {
+                "EMBEDDING_MODEL": env_model or "not set",
+                "EMBEDDING_DEVICE": env_device,
+                "EMBEDDING_CACHE_DIR": env_cache_dir,
+                "priority": "Environment Variables → Config → Defaults",
+            },
+            "fallback_models": self.model_priority,
+        }
+
         if not self.current_model:
-            return {
-                "name": self.current_model_name,
-                "status": "No custom model loaded",
-                "embedding_dim": "Unknown",
-                "type": "ChromaDB default",
-                "device": "N/A",
-            }
+            base_info.update(
+                {
+                    "status": "No custom model loaded (using ChromaDB default)",
+                    "embedding_dim": "Unknown",
+                    "type": "ChromaDB default",
+                    "device": "N/A",
+                    "note": "Use configure_embedding_model() to load custom model",
+                }
+            )
+            return base_info
 
         try:
             # Try to get embedding dimension
@@ -450,7 +490,9 @@ class EmbeddingManager:
             )
             embedding_dim = (
                 len(test_embedding[0]) if len(test_embedding) > 0 else "Unknown"
-            )  # Get device information
+            )
+
+            # Get device information
             device = "Unknown"
             try:
                 if hasattr(self.current_model, "device"):
@@ -464,14 +506,17 @@ class EmbeddingManager:
             embedding_dim = "Unknown"
             device = "Unknown"
 
-        return {
-            "name": self.current_model_name,
-            "status": "Loaded and ready",
-            "embedding_dim": embedding_dim,
-            "type": "SentenceTransformer",
-            "device": device,
-            "cached_models": list(self.models.keys()),
-        }
+        base_info.update(
+            {
+                "status": "Loaded and ready",
+                "embedding_dim": embedding_dim,
+                "type": "SentenceTransformer",
+                "device": device,
+                "cached_models": list(self.models.keys()),
+            }
+        )
+
+        return base_info
 
     def get_metrics(self) -> Dict[str, Any]:
         """
@@ -607,3 +652,99 @@ class EmbeddingManager:
             "recommendation": "For best multilingual performance: nomic-ai/nomic-embed-text-v2-moe",
             "note": "All models are publicly accessible, no HF token required",
         }
+
+    def _get_model_from_env(self) -> Optional[str]:
+        """
+        Get embedding model from environment variables (PRIORITY 1).
+
+        Environment Variables checked in order:
+        1. EMBEDDING_MODEL - Primary model name
+        2. MCP_EMBEDDING_MODEL - Alternative naming
+        3. CHROMA_EMBEDDING_MODEL - ChromaDB specific
+
+        Returns:
+            Model name if found in env, None otherwise
+        """
+        env_vars = ["EMBEDDING_MODEL", "MCP_EMBEDDING_MODEL", "CHROMA_EMBEDDING_MODEL"]
+
+        for env_var in env_vars:
+            model_name = os.getenv(env_var)
+            if model_name:
+                logger.info(f"🌍 Using model from {env_var}: {model_name}")
+                return model_name.strip()
+
+        logger.info("🔍 No embedding model found in environment variables")
+        return None
+
+    def _get_fallback_models_from_env(self) -> List[str]:
+        """
+        Get fallback models from environment variables.
+
+        Environment Variables:
+        - EMBEDDING_FALLBACK_MODELS: comma-separated list
+
+        Returns:
+            List of fallback model names
+        """
+        fallback_env = os.getenv("EMBEDDING_FALLBACK_MODELS", "")
+        if fallback_env:
+            models = [m.strip() for m in fallback_env.split(",") if m.strip()]
+            logger.info(f"🔄 Fallback models from env: {models}")
+            return models
+
+        # Default fallback models if not in env
+        default_fallbacks = [
+            "sentence-transformers/all-MiniLM-L6-v2",
+            "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        ]
+        logger.info(f"📋 Using default fallback models: {default_fallbacks}")
+        return default_fallbacks
+
+    def _get_device_from_env(self) -> str:
+        """
+        Get device preference from environment variables.
+
+        Environment Variables:
+        - EMBEDDING_DEVICE: cpu, cuda, mps, auto
+
+        Returns:
+            Device string
+        """
+        device_env = os.getenv("EMBEDDING_DEVICE", "auto").lower()
+
+        if device_env == "auto":
+            return self._detect_optimal_device()
+        elif device_env in ["cpu", "cuda", "mps"]:
+            logger.info(f"🎯 Using device from env: {device_env}")
+            return device_env
+        else:
+            logger.warning(f"⚠️ Invalid device in env: {device_env}, using auto")
+            return self._detect_optimal_device()
+
+    def _get_cache_dir_from_env(self) -> str:
+        """
+        Get cache directory from environment variables.
+
+        Environment Variables checked in order:
+        1. EMBEDDING_CACHE_DIR
+        2. SENTENCE_TRANSFORMERS_HOME
+        3. MODEL_CACHE_DIR
+
+        Returns:
+            Cache directory path
+        """
+        env_vars = [
+            "EMBEDDING_CACHE_DIR",
+            "SENTENCE_TRANSFORMERS_HOME",
+            "MODEL_CACHE_DIR",
+        ]
+
+        for env_var in env_vars:
+            cache_dir = os.getenv(env_var)
+            if cache_dir:
+                logger.info(f"📁 Using cache dir from {env_var}: {cache_dir}")
+                return cache_dir
+
+        default_cache = "./models_cache"
+        logger.info(f"📁 Using default cache dir: {default_cache}")
+        return default_cache
