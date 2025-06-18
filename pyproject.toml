@@ -3,17 +3,12 @@ name = "py-chroma-mcp"
 version = "0.1.0"
 description = "A simple Model Context Protocol (MCP) server using stdio."
 authors = [
-    { name = "Your Name", email = "your.email@example.com" }
+    { name = "Mai Thành Duy An", email = "tiachop0102@gmail.com" }
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "chromadb>=1.0.12",
-    "mcp>=1.0.0",
-    "sentence-transformers>=2.2.0",
-    "torch>=2.0.0",
-    "numpy>=1.24.0",
-    "psutil",
-    "einops==0.8.1"
+    "mcp>=1.0.0"
 ]
 
 [tool.black]
