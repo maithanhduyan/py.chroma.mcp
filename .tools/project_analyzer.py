@@ -102,14 +102,6 @@ def write_markdown(files, output_file, root_dir, exclude_dirs=None, exclude_file
         f.write("```\n")
         f.write(root_dir + "\n")
         f.write(tree)
-        f.write("```\n ")
-        f.write("```\n config: Cấu hình server / embedding / chunking")
-        f.write("```\n server.py: Điểm khởi động server chính (entrypoint)")
-        f.write("```\n tools/: Tất cả MCP tools (được đánh dấu bằng @mcp.tool)")
-        f.write("```\n embedding/: Mô hình embedding + chunking")
-        f.write("```\n db/: ChromaDB client, cấu hình collection, schema")
-        f.write("```\n utils/: Các tiện ích chung")
-        f.write("```\n ")
         f.write("```\n\n")
 
         # Viết nội dung các tệp
