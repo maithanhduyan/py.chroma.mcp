@@ -4,7 +4,6 @@ from enum import Enum
 import chromadb
 from mcp.server.fastmcp import FastMCP
 import os
-import sys
 from dotenv import load_dotenv
 import argparse
 from chromadb.config import Settings
@@ -12,9 +11,6 @@ import ssl
 import uuid
 import time
 import json
-import unicodedata
-import re
-import numpy as np
 from typing_extensions import TypedDict
 
 from utils.logger import get_logger
@@ -32,10 +28,6 @@ from chromadb.api.collection_configuration import (
 from chromadb.utils.embedding_functions import (
     DefaultEmbeddingFunction,
     EmbeddingFunction,
-)
-from chromadb.api.types import (
-    Metadata,
-    OneOrMany,
 )
 
 # Initialize FastMCP server
@@ -201,6 +193,58 @@ async def echo(message: str) -> str:
 
 
 @mcp.tool()
+async def semantic_chunking(
+    text: str, chunk_size: int = 500, overlap: int = 50
+) -> List[str]:
+    """
+    Chia nhỏ văn bản thành các đoạn (chunk) dựa trên kích thước và chồng lặp.
+
+    Tham số:
+        text: Văn bản cần chia nhỏ.
+        chunk_size: Kích thước tối đa của mỗi chunk (số ký tự).
+        overlap: Số ký tự chồng lặp giữa các chunk (tùy chọn).
+
+    Trả về:
+        Danh sách các chunk (mỗi chunk là một đoạn văn bản nhỏ).
+    """
+    if not text:
+        raise ValueError("Văn bản đầu vào không được để trống.")
+    if chunk_size <= 0:
+        raise ValueError("Kích thước chunk phải lớn hơn 0.")
+    if overlap < 0:
+        raise ValueError("Chồng lặp không được âm.")
+
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = min(start + chunk_size, len(text))
+        chunk = text[start:end]
+        chunks.append(chunk)
+        start += chunk_size - overlap  # Dịch chuyển với chồng lặp
+    return chunks
+
+
+@mcp.tool()
+async def semantic_chunking_by_embedding(
+    text: str, similarity_threshold: float = 0.85
+) -> List[str]:
+    """
+    Chia nhỏ văn bản thành các đoạn dựa trên ngưỡng tương đồng nhúng.
+
+    Tham số:
+        text: Văn bản cần chia nhỏ.
+        similarity_threshold: Ngưỡng tương đồng để xác định khi nào tạo chunk mới.
+
+    Trả về:
+        Danh sách các chunk (mỗi chunk là một đoạn văn bản nhỏ).
+    """
+
+    chunks = []
+
+    return chunks
+
+
+@mcp.tool()
 async def list_collections(
     limit: int | None = None, offset: int | None = None
 ) -> List[str]:
@@ -224,6 +268,90 @@ async def list_collections(
 
     except Exception as e:
         raise Exception(f"Failed to list collections: {str(e)}") from e
+
+
+# Lazy loading cache cho embedding functions để tăng hiệu suất startup
+_embedding_function_cache: Dict[str, EmbeddingFunction] = {}
+
+
+def get_embedding_function(name: str = "default") -> EmbeddingFunction:
+    """
+    Lazy load embedding function để tối ưu hiệu suất khởi động server.
+
+    Args:
+        name: Tên embedding function ('default', 'nomic_vietnamese')
+
+    Returns:
+        EmbeddingFunction instance
+    """
+    if name in _embedding_function_cache:
+        logger.debug(f"Using cached embedding function: {name}")
+        return _embedding_function_cache[name]
+
+    logger.info(
+        f"Loading embedding function: {name} (first time, may take a moment...)"
+    )
+
+    try:
+        if name == "default":
+            embedding_fn = DefaultEmbeddingFunction()
+        elif name == "nomic_vietnamese":
+            embedding_fn = NomicVietnameseEmbeddingFunction()
+        else:
+            logger.warning(
+                f"Unknown embedding function: {name}, falling back to default"
+            )
+            embedding_fn = DefaultEmbeddingFunction()
+
+        # Cache để tránh load lại
+        _embedding_function_cache[name] = embedding_fn
+        logger.info(f"Successfully loaded and cached embedding function: {name}")
+        return embedding_fn
+
+    except Exception as e:
+        logger.error(f"Failed to load embedding function {name}: {e}")
+        logger.info("Falling back to DefaultEmbeddingFunction")
+        if "default" not in _embedding_function_cache:
+            _embedding_function_cache["default"] = DefaultEmbeddingFunction()
+        return _embedding_function_cache["default"]
+
+
+def preload_embedding_functions(*names: str) -> None:
+    """
+    Preload embedding functions để tối ưu hiệu suất.
+    Hữu ích cho production environments khi muốn load models trước.
+
+    Args:
+        *names: Tên các embedding function cần preload
+    """
+    logger.info(f"Preloading embedding functions: {names}")
+
+    for name in names:
+        try:
+            get_embedding_function(name)
+            logger.info(f"✅ Preloaded: {name}")
+        except Exception as e:
+            logger.error(f"❌ Failed to preload {name}: {e}")
+
+
+def clear_embedding_cache() -> None:
+    """
+    Xóa cache embedding functions để giải phóng memory nếu cần.
+    """
+    global _embedding_function_cache
+    cache_count = len(_embedding_function_cache)
+    _embedding_function_cache.clear()
+    logger.info(f"Cleared embedding function cache ({cache_count} functions removed)")
+
+
+def get_cached_embedding_functions() -> List[str]:
+    """
+    Lấy danh sách các embedding functions đã được cache.
+
+    Returns:
+        List tên các embedding function đã cache
+    """
+    return list(_embedding_function_cache.keys())
 
 
 @mcp.tool()
@@ -251,13 +379,12 @@ async def create_collection(
         num_threads: Số lượng luồng được sử dụng trong quá trình xây dựng HNSW.
         batch_size: Số lượng phần tử được xử lý cùng lúc trong quá trình xây dựng chỉ mục.
         sync_threshold: Số lượng phần tử cần xử lý trước khi đồng bộ chỉ mục với đĩa.
-        resize_factor: Hệ số mở rộng chỉ mục khi nó đầy.
-        embedding_function_name: Tên của hàm nhúng được sử dụng. Các tùy chọn: 'default', 'nomic', 'nomic_vietnamese'.
+        resize_factor: Hệ số mở rộng chỉ mục khi nó đầy.        embedding_function_name: Tên của hàm nhúng được sử dụng. Các tùy chọn: 'default', 'nomic_vietnamese'.
         metadata: Từ điển metadata tùy chọn để thêm vào collection.
     """
     client = get_chroma_client()
 
-    embedding_function = mcp_known_embedding_functions[embedding_function_name]
+    embedding_function = get_embedding_function(embedding_function_name)
     hnsw_config = CreateHNSWConfiguration()
     if space:
         if space in ("l2", "ip", "cosine"):
@@ -442,9 +569,9 @@ async def add_documents(
     collection_name: str,
     documents: List[str],
     ids: List[str],
-    metadatas: OneOrMany[Metadata] | None = None,
+    metadatas: List[Dict] | None = None,
 ) -> str:
-    """Thêm tài liệu vào một collection của Chroma, đảm bảo thực hiện embedding nếu cần.
+    """Thêm tài liệu vào một collection của Chroma.
 
     Tham số:
         collection_name: Tên của collection cần thêm tài liệu.
@@ -458,6 +585,7 @@ async def add_documents(
     if not ids:
         raise ValueError("The 'ids' list is required and cannot be empty.")
 
+    # Check if there are empty strings in the ids list
     if any(not id.strip() for id in ids):
         raise ValueError("IDs cannot be empty strings.")
 
@@ -473,38 +601,28 @@ async def add_documents(
         # Check for duplicate IDs
         existing_ids = collection.get(include=[])["ids"]
         duplicate_ids = [id for id in ids if id in existing_ids]
+
         if duplicate_ids:
             raise ValueError(
                 f"The following IDs already exist in collection '{collection_name}': {duplicate_ids}. "
-                f"Use 'update_documents' to update existing documents."
+                f"Use 'chroma_update_documents' to update existing documents."
             )
 
-        # Check for embedding_function
-        use_embedding = getattr(collection, "embedding_function", None)
-        if use_embedding:
-            # Collection có embedding function, để ChromaDB tự động xử lý
-            logger.info(
-                f"Using collection's built-in embedding function for {len(documents)} documents"
-            )
-            result = collection.add(documents=documents, metadatas=metadatas, ids=ids)
-        else:
-            # Manually compute embeddings sử dụng default embedding function
-            logger.info(f"Computing embeddings manually for {len(documents)} documents")
-            embedding_fn = mcp_known_embedding_functions["default"]
-            embeddings = embedding_fn(documents)
-            result = collection.add(
-                documents=documents, metadatas=metadatas, ids=ids, embeddings=embeddings
-            )
+        result = collection.add(documents=documents, metadatas=metadatas, ids=ids)  # type: ignore
 
-        # Process result
+        # Check the return value
         if result and isinstance(result, dict):
+            # If the return value is a dictionary, it may contain success information
             if "success" in result and not result["success"]:
                 raise Exception(
                     f"Failed to add documents: {result.get('error', 'Unknown error')}"
                 )
+
+            # If the return value contains the actual number added
             if "count" in result:
                 return f"Successfully added {result['count']} documents to collection {collection_name}"
 
+        # Default return
         return f"Successfully added {len(documents)} documents to collection {collection_name}, result is {result}"
     except Exception as e:
         raise Exception(
@@ -757,15 +875,6 @@ def process_thought(input_data: Dict) -> Dict:
         return {"error": str(e), "status": "failed"}
 
 
-# Initialize embedding functions dictionary
-# Generated by Copilot
-mcp_known_embedding_functions: Dict[str, EmbeddingFunction] = {
-    # "default": DefaultEmbeddingFunction(),
-    # "nomic": NomicEmbeddingFunction(),
-    "default": NomicVietnameseEmbeddingFunction(),
-}
-
-
 def main():
     """Main entry point for the MCP server."""
     parser = create_parser()
@@ -774,19 +883,13 @@ def main():
         get_chroma_client(args)
         logger.info("Loading Chroma client...")
         logger.info(f"{str(args)}")
-
-        # Initialize and run the server
-        logger.info("Starting MCP server")
-        mcp.run(transport="stdio")
-
-    except KeyboardInterrupt:
-        logger.info("\n🛑 Server shutdown requested by user")
     except Exception as e:
-        logger.error(f"💥 Server startup failed: {e}")
-        logger.exception("Server startup error details:")
-        sys.exit(1)
-    finally:
-        logger.info("🔚 FastMCP ChromaDB Server stopped")
+        logger.info(f"Failed to initialize Chroma client: {str(e)}")
+        raise
+
+    # Initialize and run the server
+    logger.info("Starting MCP server")
+    mcp.run(transport="stdio")
 
 
 if __name__ == "__main__":
