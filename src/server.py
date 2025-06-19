@@ -4,6 +4,7 @@ from enum import Enum
 import chromadb
 from mcp.server.fastmcp import FastMCP
 import os
+import sys
 from dotenv import load_dotenv
 import argparse
 from chromadb.config import Settings
@@ -12,9 +13,22 @@ import uuid
 import time
 import json
 from typing_extensions import TypedDict
+from pydantic import ValidationError as PydanticValidationError
 
 from utils.logger import get_logger
 from embedding.nomic_embedding_function import NomicVietnameseEmbeddingFunction
+from models import (
+    CreateCollectionRequest,
+    AddDocumentsRequest,
+    QueryDocumentsRequest,
+    GetDocumentsRequest,
+    UpdateDocumentsRequest,
+    DeleteDocumentsRequest,
+    OperationResponse,
+    ValidationError,
+    normalize_collection_name,
+    validate_vietnamese_text,
+)
 
 logger = get_logger(__name__)
 
@@ -35,6 +49,71 @@ mcp = FastMCP("chroma")
 
 # Global variables
 _chroma_client = None
+
+
+# Pydantic validation decorators và helper functions
+def handle_pydantic_validation(func):
+    """
+    Decorator để xử lý Pydantic validation errors.
+
+    Args:
+        func: Function cần wrap validation
+
+    Returns:
+        Wrapped function với error handling
+    """
+
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except PydanticValidationError as e:
+            # Convert Pydantic errors thành format dễ hiểu
+            errors = []
+            for error in e.errors():
+                field = " -> ".join(str(x) for x in error["loc"])
+                errors.append(
+                    ValidationError(
+                        field=field, message=error["msg"], value=error.get("input")
+                    )
+                )
+
+            error_msg = f"Validation failed: {len(errors)} error(s)"
+            logger.error(f"{error_msg}: {[err.dict() for err in errors]}")
+
+            return OperationResponse(
+                success=False,
+                message=error_msg,
+                data=None,
+                error=f"Validation errors in fields: {', '.join([err.field for err in errors])}",
+            ).dict()
+        except Exception as e:
+            logger.error(f"Unexpected error in {func.__name__}: {e}")
+            return OperationResponse(
+                success=False, message="Internal server error", data=None, error=str(e)
+            ).dict()
+
+    return wrapper
+
+
+def validate_request_data(model_class, data: Dict[str, Any]):
+    """
+    Validate request data với Pydantic model.
+
+    Args:
+        model_class: Pydantic model class
+        data: Data cần validate
+
+    Returns:
+        Validated model instance
+
+    Raises:
+        PydanticValidationError: Nếu validation thất bại
+    """
+    try:
+        return model_class(**data)
+    except PydanticValidationError as e:
+        logger.error(f"Validation failed for {model_class.__name__}: {e}")
+        raise
 
 
 def create_parser():
@@ -190,58 +269,6 @@ def get_chroma_client(args=None):
 async def echo(message: str) -> str:
     """Phản hồi lại thông điệp đầu vào (hữu ích để kiểm tra)."""
     return f"Echo: {message}"
-
-
-@mcp.tool()
-async def semantic_chunking(
-    text: str, chunk_size: int = 500, overlap: int = 50
-) -> List[str]:
-    """
-    Chia nhỏ văn bản thành các đoạn (chunk) dựa trên kích thước và chồng lặp.
-
-    Tham số:
-        text: Văn bản cần chia nhỏ.
-        chunk_size: Kích thước tối đa của mỗi chunk (số ký tự).
-        overlap: Số ký tự chồng lặp giữa các chunk (tùy chọn).
-
-    Trả về:
-        Danh sách các chunk (mỗi chunk là một đoạn văn bản nhỏ).
-    """
-    if not text:
-        raise ValueError("Văn bản đầu vào không được để trống.")
-    if chunk_size <= 0:
-        raise ValueError("Kích thước chunk phải lớn hơn 0.")
-    if overlap < 0:
-        raise ValueError("Chồng lặp không được âm.")
-
-    chunks = []
-    start = 0
-    while start < len(text):
-        end = min(start + chunk_size, len(text))
-        chunk = text[start:end]
-        chunks.append(chunk)
-        start += chunk_size - overlap  # Dịch chuyển với chồng lặp
-    return chunks
-
-
-@mcp.tool()
-async def semantic_chunking_by_embedding(
-    text: str, similarity_threshold: float = 0.85
-) -> List[str]:
-    """
-    Chia nhỏ văn bản thành các đoạn dựa trên ngưỡng tương đồng nhúng.
-
-    Tham số:
-        text: Văn bản cần chia nhỏ.
-        similarity_threshold: Ngưỡng tương đồng để xác định khi nào tạo chunk mới.
-
-    Trả về:
-        Danh sách các chunk (mỗi chunk là một đoạn văn bản nhỏ).
-    """
-
-    chunks = []
-
-    return chunks
 
 
 @mcp.tool()
@@ -565,6 +592,7 @@ async def delete_collection(collection_name: str) -> str:
 
 ##### Document Tools #####
 @mcp.tool()
+@handle_pydantic_validation
 async def add_documents(
     collection_name: str,
     documents: List[str],
@@ -579,36 +607,48 @@ async def add_documents(
         ids: Danh sách các ID cho các tài liệu (bắt buộc).
         metadatas: Danh sách metadata tùy chọn cho mỗi tài liệu.
     """
-    if not documents:
-        raise ValueError("The 'documents' list cannot be empty.")
+    # Validate input using Pydantic model
+    request_data = {
+        "collection_name": collection_name,
+        "documents": documents,
+        "ids": ids,
+        "metadatas": metadatas,
+    }
 
-    if not ids:
-        raise ValueError("The 'ids' list is required and cannot be empty.")
-
-    # Check if there are empty strings in the ids list
-    if any(not id.strip() for id in ids):
-        raise ValueError("IDs cannot be empty strings.")
-
-    if len(ids) != len(documents):
-        raise ValueError(
-            f"Number of ids ({len(ids)}) must match number of documents ({len(documents)})."
-        )
+    validated_request = validate_request_data(AddDocumentsRequest, request_data)
 
     client = get_chroma_client()
     try:
-        collection = client.get_or_create_collection(collection_name)
+        collection = client.get_or_create_collection(validated_request.collection_name)
 
         # Check for duplicate IDs
         existing_ids = collection.get(include=[])["ids"]
-        duplicate_ids = [id for id in ids if id in existing_ids]
+        duplicate_ids = [id for id in validated_request.ids if id in existing_ids]
 
         if duplicate_ids:
             raise ValueError(
-                f"The following IDs already exist in collection '{collection_name}': {duplicate_ids}. "
+                f"The following IDs already exist in collection '{validated_request.collection_name}': {duplicate_ids}. "
                 f"Use 'chroma_update_documents' to update existing documents."
-            )
+            )  # Convert Pydantic models to dict if needed
+        metadatas_dict = None
+        if validated_request.metadatas:
+            metadatas_dict = []
+            for metadata in validated_request.metadatas:
+                if hasattr(metadata, "model_dump"):
+                    # Pydantic model
+                    metadatas_dict.append(metadata.model_dump())
+                elif isinstance(metadata, dict):
+                    # Already a dict
+                    metadatas_dict.append(metadata)
+                else:
+                    # Convert to dict
+                    metadatas_dict.append(dict(metadata))
 
-        result = collection.add(documents=documents, metadatas=metadatas, ids=ids)  # type: ignore
+        result = collection.add(
+            documents=validated_request.documents,
+            metadatas=metadatas_dict,
+            ids=validated_request.ids,
+        )
 
         # Check the return value
         if result and isinstance(result, dict):
@@ -620,17 +660,18 @@ async def add_documents(
 
             # If the return value contains the actual number added
             if "count" in result:
-                return f"Successfully added {result['count']} documents to collection {collection_name}"
+                return f"Successfully added {result['count']} documents to collection {validated_request.collection_name}"
 
         # Default return
-        return f"Successfully added {len(documents)} documents to collection {collection_name}, result is {result}"
+        return f"Successfully added {len(validated_request.documents)} documents to collection {validated_request.collection_name}, result is {result}"
     except Exception as e:
         raise Exception(
-            f"Failed to add documents to collection '{collection_name}': {str(e)}"
+            f"Failed to add documents to collection '{validated_request.collection_name}': {str(e)}"
         ) from e
 
 
 @mcp.tool()
+@handle_pydantic_validation
 async def query_documents(
     collection_name: str,
     query_texts: List[str],
@@ -654,23 +695,32 @@ async def query_documents(
         where_document: Bộ lọc nội dung tài liệu tùy chọn.
         include: Danh sách các thông tin cần bao gồm trong kết quả. Mặc định bao gồm tài liệu, metadata và khoảng cách.
     """
-    if not query_texts:
-        raise ValueError("The 'query_texts' list cannot be empty.")
+    # Validate input using Pydantic model
+    request_data = {
+        "collection_name": collection_name,
+        "query_texts": query_texts,
+        "n_results": n_results,
+        "include": include,
+        "where": where,
+        "where_document": where_document,
+    }
+
+    validated_request = validate_request_data(QueryDocumentsRequest, request_data)
 
     client = get_chroma_client()
     try:
-        collection = client.get_collection(collection_name)
+        collection = client.get_collection(validated_request.collection_name)
         results = collection.query(
-            query_texts=query_texts,
-            n_results=n_results,
-            where=where,
-            where_document=where_document,
-            include=include,  # type: ignore
+            query_texts=validated_request.query_texts,
+            n_results=validated_request.n_results,
+            where=validated_request.where,  # type: ignore
+            where_document=validated_request.where_document,  # type: ignore
+            include=validated_request.include,  # type: ignore
         )
         return dict(results)  # Convert QueryResult to dict
     except Exception as e:
         raise Exception(
-            f"Failed to query documents from collection '{collection_name}': {str(e)}"
+            f"Failed to query documents from collection '{validated_request.collection_name}': {str(e)}"
         ) from e
 
 
@@ -879,17 +929,25 @@ def main():
     """Main entry point for the MCP server."""
     parser = create_parser()
     args = parser.parse_args()
-    try:
-        get_chroma_client(args)
-        logger.info("Loading Chroma client...")
-        logger.info(f"{str(args)}")
-    except Exception as e:
-        logger.info(f"Failed to initialize Chroma client: {str(e)}")
-        raise
 
-    # Initialize and run the server
-    logger.info("Starting MCP server")
-    mcp.run(transport="stdio")
+    try:
+        # Initialize Chroma client
+        get_chroma_client(args)
+        logger.info("✅ Loading Chroma client...")
+        logger.info(f"🔧 Server args: {str(args)}")
+
+        # Initialize and run the server
+        logger.info("🚀 Starting FastMCP ChromaDB Server...")
+        mcp.run(transport="stdio")
+
+    except KeyboardInterrupt:
+        logger.info("\n🛑 Server shutdown requested by user")
+    except Exception as e:
+        logger.error(f"💥 Server startup failed: {e}")
+        logger.exception("Server startup error details:")
+        sys.exit(1)
+    finally:
+        logger.info("🔚 FastMCP ChromaDB Server stopped")
 
 
 if __name__ == "__main__":
