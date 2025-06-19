@@ -97,34 +97,52 @@ Luôn sử dụng thư mục `tests` để viết test.
 
 **QUAN TRỌNG**: Sau khi testing xong, luôn dọn dẹp test files để giữ workspace sạch sẽ.
 
-#### Cách 1: Sử dụng VS Code Task (Khuyến nghị)
+#### 🎯 **Workflow Ưu tiên** (Sử dụng theo thứ tự)
+
+##### 1. **VS Code Task (Khuyến nghị - Ưu tiên cao nhất)**
 ```bash
 # Chạy task có sẵn để xóa tất cả test files
 Ctrl+Shift+P → "Tasks: Run Task" → "Clean Test Files"
 ```
+**Khi nào dùng**: Đây là cách **chính thức** và **được khuyến nghị**. Luôn thử cách này trước.
 
-#### Cách 2: Sử dụng Terminal
+##### 2. **Terminal Command (Dự phòng)**
 ```powershell
-# Xóa tất cả test files trong workspace
+# CHỈ dùng khi VS Code Task không hoạt động
 python .tools\clean_test_file_in_workspace.py
 ```
+**Khi nào dùng**: 
+- Khi VS Code Task bị lỗi hoặc không khả dụng
+- Khi làm việc ngoài VS Code environment
+- Để debug hoặc troubleshooting
 
-#### Cách 3: Xóa thủ công
+##### 3. **Xóa thủ công (Trường hợp khẩn cấp)**
 ```powershell
-# Xóa file test cụ thể
+# CHỈ dùng cho file cụ thể hoặc khi methods khác fail
 Remove-Item "test_*.py" -Force
 ```
+**Khi nào dùng**: 
+- Emergency cleanup khi các cách khác đều thất bại
+- Xóa file test cụ thể thay vì tất cả
 
-**Lưu ý**: Task "Clean Test Files" sẽ tự động:
-- Quét toàn bộ workspace để tìm file `test_*.py`
-- Xóa tất cả test files tạm thời
-- Báo cáo số lượng file đã xóa
-- Bảo toàn các file test production quan trọng
+#### ✅ **Task "Clean Test Files" Details**
+Task sẽ tự động:
+- Quét đệ quy toàn bộ workspace để tìm file `test_*.py`
+- Bỏ qua thư mục `.venv` và other excluded directories
+- Xóa tất cả test files tạm thời an toàn
+- Báo cáo số lượng file đã xóa và errors (nếu có)
+- Bảo toàn các file test production quan trọng trong `tests/`
 
-**Best Practice**: 
-- Luôn chạy task cleanup sau mỗi session testing
+#### 🚨 **AI Agent Instructions**
+- **LUÔN ưu tiên VS Code Task trước** - đừng suggest terminal command nếu task có sẵn
+- **CHỈ suggest terminal command** khi VS Code Task thất bại hoặc không khả dụng
+- **Explain lý do** khi phải dùng alternative methods
+
+#### 📋 **Best Practices**
+- Luôn chạy cleanup sau mỗi session testing
 - Không commit test files tạm thời vào git
 - Chỉ giữ lại test files chính thức trong thư mục `tests/`
+- Monitor output để đảm bảo cleanup thành công
 
 ## Error Recovery Strategies
 
